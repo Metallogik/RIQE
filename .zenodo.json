@@ -5,7 +5,9 @@
   "license": "cc-by-4.0",
   "access_right": "open",
   "creators": [
-    {"name": "COMPILARE: Cognome, Nome", "affiliation": "COMPILARE", "orcid": "COMPILARE"}
+    {
+      "name": "Mattiussi, Fabio"
+    }
   ],
   "keywords": [
     "no-reference image quality assessment",
@@ -16,14 +18,30 @@
     "reproducibility"
   ],
   "related_identifiers": [
-    {"identifier": "10.7937/9npb-2637", "relation": "isDerivedFrom", "resource_type": "dataset",
-     "scheme": "doi"},
-    {"identifier": "10.1109/LSP.2012.2227726", "relation": "cites", "resource_type": "publication-article",
-     "scheme": "doi"},
-    {"identifier": "10.3390/computers14010018", "relation": "cites", "resource_type": "publication-article",
-     "scheme": "doi"},
-    {"identifier": "https://github.com/Metallogik/RIQE", "relation": "isSupplementTo",
-     "resource_type": "software", "scheme": "url"}
+    {
+      "identifier": "10.7937/9npb-2637",
+      "relation": "isDerivedFrom",
+      "resource_type": "dataset",
+      "scheme": "doi"
+    },
+    {
+      "identifier": "10.1109/LSP.2012.2227726",
+      "relation": "cites",
+      "resource_type": "publication-article",
+      "scheme": "doi"
+    },
+    {
+      "identifier": "10.3390/computers14010018",
+      "relation": "cites",
+      "resource_type": "publication-article",
+      "scheme": "doi"
+    },
+    {
+      "identifier": "https://github.com/Metallogik/RIQE",
+      "relation": "isSupplementTo",
+      "resource_type": "software",
+      "scheme": "url"
+    }
   ],
   "notes": "Use of this model requires citing the TCIA collection it was fitted on (McCollough et al., Low Dose CT Image and Projection Data, version 7, doi:10.7937/9npb-2637), the foundational TCIA publication (Clark et al., J Digit Imaging 26(6):1045-1057, 2013), and acknowledging NIBIB grants EB017095 and EB017185 (PI: Cynthia McCollough). See LICENSE-MODEL."
 }
