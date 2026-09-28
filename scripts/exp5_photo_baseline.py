@@ -40,6 +40,7 @@ import io
 import json
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -60,21 +61,63 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "experiments"
 PHOTOS = ROOT / "data" / "photos"
 API = "https://commons.wikimedia.org/w/api.php"
-UA = "riqe/0.1 (research; no-reference IQA model fitting; contact via repository)"
+#: la policy di Wikimedia richiede uno User-Agent descrittivo con un
+#: riferimento di contatto: senza, l'API risponde 429.  Usiamo l'URL pubblico
+#: del repository, non un indirizzo personale.
+UA = "RIQE/0.1 (https://github.com/Metallogik/RIQE) python-urllib"
+
+#: pausa fra chiamate all'API, per non farsi limitare
+API_SLEEP = 1.0
 
 #: licenze accettate: solo pubblico dominio e CC0, per non ereditare vincoli
 PERMISSIVE = ("cc0", "public domain", "pd-", "publicdomain", "cc-zero")
+
+#: Il corpus deve essere di **fotografie naturali**: l'articolo NIQE dice
+#: esplicitamente che il modello statistico "is violated when the images do
+#: not derive from a natural source (e.g. computer graphics)".  Le immagini
+#: in pubblico dominio di Commons sono pero' ricche di mappe, incisioni,
+#: stampe e grafica generata, che sono PD proprio perche' antiche o
+#: sintetiche.  Scartiamo per parole chiave nelle categorie e nel titolo, e
+#: accettiamo solo JPEG: i formati senza perdita su Commons sono quasi sempre
+#: grafica vettoriale rasterizzata, diagrammi o animazioni.
+NON_PHOTO = (
+    "map", "maps", "cartograph", "atlas", "chart", "diagram", "engraving",
+    "etching", "lithograph", "woodcut", "drawing", "painting", "artwork",
+    "illustration", "poster", "manuscript", "codex", "book", "page scan",
+    "svg", "animation", "animated", "render", "3d model", "fractal", "logo",
+    "coat of arms", "flag", "stamp", "banknote", "typography", "font",
+    "comic", "cartoon", "graph", "plot", "schematic", "blueprint", "sheet music",
+    # intrusi osservati nel bacino CC0: non sono grafica, ma non sono
+    # nemmeno scene naturali, ed e' la naturalita' che l'assunzione NSS
+    # richiede
+    "sculpture", "statue", "radiograph", "x-ray", "calligraphy", "mosaic",
+    "stained glass", "tapestry", "medal",
+)
+ACCEPTED_MIME = ("image/jpeg",)
 
 #: al massimo questo numero di patch per fotografia, perche' una foto da 20
 #: megapixel non pesi cento volte una slice TC nel fitting
 MAX_PATCHES_PER_PHOTO = 500
 
 
-def api(params: dict) -> dict:
+def api(params: dict, retries: int = 5) -> dict:
+    """Chiamata all'API di Commons, con attesa crescente sui 429."""
     q = urllib.parse.urlencode({**params, "format": "json"})
     req = urllib.request.Request(f"{API}?{q}", headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(r.read())
+    delay = 2.0
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                out = json.loads(r.read())
+            time.sleep(API_SLEEP)
+            return out
+        except urllib.error.HTTPError as e:
+            if e.code not in (429, 503) or attempt == retries - 1:
+                raise
+            print(f"    HTTP {e.code}, attendo {delay:.0f}s", flush=True)
+            time.sleep(delay)
+            delay *= 2
+    raise RuntimeError("irraggiungibile")
 
 
 def is_permissive(ext: dict) -> tuple[bool, str]:
@@ -84,22 +127,54 @@ def is_permissive(ext: dict) -> tuple[bool, str]:
     return any(t in both for t in PERMISSIVE), lic or licname
 
 
+def is_photograph(title: str, ext: dict, mime: str) -> tuple[bool, str]:
+    """Filtro fotografico, con il motivo del rifiuto per la registrazione."""
+    if mime not in ACCEPTED_MIME:
+        return False, f"mime {mime}"
+    cats = (ext.get("Categories", {}).get("value", "") or "").lower()
+    hay = f"{title.lower()} {cats}"
+    for t in NON_PHOTO:
+        if t in hay:
+            return False, f"categoria/titolo: {t}"
+    return True, ""
+
+
+#: Bacino da cui pescare.  NON "Featured pictures": il suo sottoinsieme in
+#: pubblico dominio e' dominato da mappe, incisioni, monete e certificati
+#: azionari -- quelle immagini sono PD *perche' antiche*, quindi sono
+#: scansioni di documenti, non fotografie.  Misurato: su 1500 candidati, i
+#: pochi permissivi superstiti erano azioni ferroviarie e ritratti dipinti.
+#: "Quality images" e' invece una selezione di fotografie moderne curata per
+#: qualita' tecnica, che e' esattamente cio' che serve a un corpus pristine.
+#: `Category:CC-Zero` e' la categoria di *licenza*: pescando da li' la
+#: licenza e' garantita al 100%, e resta solo da filtrare le fotografie.
+#: Pescare da "Quality images" e filtrare per licenza dava una resa dello
+#: 0,5%, misurata: il bacino sbagliato.
+POOL_CATEGORY = "Category:CC-Zero"
+
+#: categorie che segnalano una selezione per qualita' tecnica: a parita' di
+#: licenza si preferiscono, perche' un corpus pristine deve esserlo davvero
+QUALITY_MARKERS = ("quality images", "featured pictures", "valued images")
+
+
 def harvest(n_wanted: int, seed: int) -> list[dict]:
-    """Fotografie di qualita' in pubblico dominio o CC0 da Wikimedia Commons."""
+    """Fotografie di qualita' con licenza permissiva da Wikimedia Commons."""
     members, cont = [], {}
-    for _ in range(30):
+    #: bastano ampiamente per sceglierne 125 dopo il filtro di licenza
+    target_pool = max(4000, n_wanted * 30)
+    for _ in range(20):
         r = api({"action": "query", "list": "categorymembers",
-                 "cmtitle": "Category:Featured pictures on Wikimedia Commons",
+                 "cmtitle": POOL_CATEGORY,
                  "cmtype": "file", "cmlimit": "500", **cont})
         members += [m["title"] for m in r["query"]["categorymembers"]]
-        if "continue" not in r or len(members) > 6000:
+        if "continue" not in r or len(members) >= target_pool:
             break
         cont = r["continue"]
     rng = np.random.default_rng(seed)
     rng.shuffle(members)
     print(f"candidati da Commons: {len(members)}")
 
-    out = []
+    out, rejected = [], {}
     for i in range(0, len(members), 40):
         batch = members[i : i + 40]
         r = api({"action": "query", "titles": "|".join(batch), "prop": "imageinfo",
@@ -108,31 +183,50 @@ def harvest(n_wanted: int, seed: int) -> list[dict]:
             ii = (pg.get("imageinfo") or [None])[0]
             if not ii or not ii.get("mime", "").startswith("image/"):
                 continue
-            ok, lic = is_permissive(ii.get("extmetadata", {}))
+            ext = ii.get("extmetadata", {})
+            ok, lic = is_permissive(ext)
             if not ok:
+                rejected["licenza non permissiva"] = rejected.get("licenza non permissiva", 0) + 1
                 continue
+            isphoto, why = is_photograph(pg["title"], ext, ii.get("mime", ""))
+            if not isphoto:
+                rejected[why] = rejected.get(why, 0) + 1
+                continue
+            cats = (ext.get("Categories", {}).get("value", "") or "").lower()
             out.append({"title": pg["title"], "license": lic,
                         "url": ii.get("thumburl") or ii["url"],
                         "descriptionurl": ii.get("descriptionurl", ""),
                         "width": ii.get("thumbwidth", ii.get("width")),
-                        "height": ii.get("thumbheight", ii.get("height"))})
+                        "height": ii.get("thumbheight", ii.get("height")),
+                        "quality_marked": any(q in cats for q in QUALITY_MARKERS)})
             if len(out) >= n_wanted:
-                return out
+                print(f"  scartate: {dict(sorted(rejected.items(), key=lambda t:-t[1])[:8])}")
+                return out, rejected
         print(f"  raccolte {len(out)}/{n_wanted}", flush=True)
-    return out
+    print(f"  scartate: {dict(sorted(rejected.items(), key=lambda t:-t[1])[:8])}")
+    return out, rejected
 
 
 def download(rec: dict) -> dict | None:
+    """Scarica una fotografia, con ritentativi su 429."""
     PHOTOS.mkdir(parents=True, exist_ok=True)
     name = hashlib.sha256(rec["title"].encode()).hexdigest()[:16] + ".img"
     path = PHOTOS / name
     if not path.exists():
         req = urllib.request.Request(rec["url"], headers={"User-Agent": UA})
-        try:
-            with urllib.request.urlopen(req, timeout=180) as r:
-                path.write_bytes(r.read())
-        except Exception as e:  # noqa: BLE001
-            return {**rec, "error": str(e)}
+        delay, last = 3.0, None
+        for _ in range(4):
+            try:
+                with urllib.request.urlopen(req, timeout=180) as r:
+                    path.write_bytes(r.read())
+                last = None
+                break
+            except Exception as e:  # noqa: BLE001
+                last = e
+                time.sleep(delay)
+                delay *= 2
+        if last is not None:
+            return {**rec, "error": str(last)}
     b = path.read_bytes()
     return {**rec, "path": str(path.relative_to(ROOT)), "sha256": hashlib.sha256(b).hexdigest(),
             "bytes": len(b)}
@@ -222,15 +316,18 @@ def main() -> int:
         print(f"corpus fotografico gia' presente: {len(photos)} immagini")
     else:
         print("raccolta da Wikimedia Commons (solo pubblico dominio / CC0)...")
-        recs = harvest(args.n_photos, args.seed)
+        recs, rejected = harvest(args.n_photos, args.seed)
         photos = []
         with cf.ThreadPoolExecutor(8) as ex:
             for r in ex.map(download, recs):
                 if r and "error" not in r:
                     photos.append(r)
         man_file.write_text(json.dumps({
-            "source": "Wikimedia Commons, Category:Featured pictures",
+            "source": f"Wikimedia Commons, {POOL_CATEGORY}",
             "license_filter": list(PERMISSIVE),
+            "photo_filter": {"rejected_keywords": list(NON_PHOTO),
+                             "accepted_mime": list(ACCEPTED_MIME),
+                             "rejection_counts": rejected},
             "n": len(photos), "seed": args.seed, "photos": photos}, indent=1))
         print(f"scaricate {len(photos)} fotografie")
 
@@ -312,7 +409,7 @@ def main() -> int:
     (OUT / "exp5_summary.json").write_text(json.dumps({
         "P": P, "C": C, "p": p,
         "photo_corpus": {"n_images": len(parts), "n_patches": int(photo_model.n_patches),
-                         "source": "Wikimedia Commons Featured pictures, PD/CC0"},
+                         "source": f"Wikimedia Commons {POOL_CATEGORY}, PD/CC0"},
         "D_ct_vs_nomask": model_divergence(ct_model, ct_nomask),
         "D_ct_vs_photo": model_divergence(ct_model, photo_model),
         "D_nomask_vs_photo": model_divergence(ct_nomask, photo_model),
