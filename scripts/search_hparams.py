@@ -18,6 +18,24 @@ Non e' il criterio di Computers 2025, che ottimizza la frazione di immagini
 in cui la rete piu' profonda risulta il miglior denoiser: quello assume la
 risposta e la usa come bersaglio.
 
+CRITERIO RIVISTO, dichiarato come tale (docs/05 §8, docs/06).  Il criterio
+sopra era cieco alla proprieta' piu' importante -- l'ordinamento della dose
+ridotta reale -- e ha scelto una configurazione che la ordina correttamente
+solo nel 38,5% degli addomi.  Dopo aver visto i dati di validazione, e con
+l'accordo esplicito del committente, il criterio diventa:
+
+  1. DOSE REALE.  Frazione di coppie (dose piena, dose ridotta reale, stessa
+     slice) in cui la dose ridotta ha punteggio peggiore, presa al minimo fra
+     torace e addome.  Soglia di superamento 0,95.
+  2. SOVRAFILTRAGGIO.  Frazione di immagini filtrate che battono l'originale:
+     minima.
+  3. RUMORE RELATIVO.  Frazione di immagini con rumore aggiunto >= 20% del
+     rumore nativo che peggiorano: massima.
+  4. STABILITA', poi patch per immagine.
+Se nessuna configurazione supera la soglia del punto 1, si ordina per il
+punto 1 e poi per il punto 2.  La scelta del criterio originale viene
+calcolata e riportata accanto, non sostituita di nascosto.
+
 Tutto sul solo split interno di FIT.  TEST non viene toccato.
 
     .venv/bin/python scripts/search_hparams.py \
@@ -48,19 +66,29 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from riqe.cache import FeatureCache  # noqa: E402
+from riqe.dosetest import dose_ordering, dose_pairs, image_moments, summarize  # noqa: E402
 from riqe.model import RCOND, mahalanobis_mixed, model_divergence  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 P_GRID = (0.05, 0.10, 0.20, 0.30, 0.40, 0.50, 0.75, 0.90)
+DOSE_PASS = 0.95
+REL_NOISE_MIN = 0.20
 
 
-def load_moments(path: str):
-    z = np.load(path, allow_pickle=False)
-    meta = pd.DataFrame(json.loads(str(z["meta"])))
-    meta["slice_path"] = json.loads(str(z["slice_path"]))
-    meta["patient_id"] = json.loads(str(z["patient_id"]))
-    meta["cell"] = json.loads(str(z["cell"]))
-    return z["nu"], z["sigma"], meta
+def load_moments(paths):
+    """Uno o piu' file di momenti, concatenati; l'indice resta la riga."""
+    NUs, SGs, metas = [], [], []
+    for path in paths:
+        z = np.load(path, allow_pickle=False)
+        meta = pd.DataFrame(json.loads(str(z["meta"])))
+        meta["slice_path"] = json.loads(str(z["slice_path"]))
+        meta["patient_id"] = json.loads(str(z["patient_id"]))
+        meta["cell"] = json.loads(str(z["cell"]))
+        NUs.append(z["nu"])
+        SGs.append(z["sigma"])
+        metas.append(meta)
+    meta = pd.concat(metas, ignore_index=True)
+    return np.concatenate(NUs), np.concatenate(SGs), meta
 
 
 def score_rows(model, NU, SG, idx) -> np.ndarray:
@@ -92,7 +120,7 @@ def bootstrap_divergence(cache, paths_by_patient, p, B, seed) -> np.ndarray:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--moments", required=True)
+    ap.add_argument("--moments", required=True, nargs="+")
     ap.add_argument("--bootstrap", type=int, default=60)
     ap.add_argument("--seed", type=int, default=20260917)
     ap.add_argument("--out", default="experiments/hparam_search.csv")
@@ -114,6 +142,15 @@ def main() -> int:
     print(f"banco: {len(meta)} righe, {meta.slice_path.nunique()} slice, "
           f"{len(configs)} configurazioni (P, C)")
 
+    # rumore nativo per slice, per esprimere il rumore aggiunto in termini relativi
+    slices_tab = pd.read_parquet(ROOT / "corpus" / "slices.parquet").set_index("path")
+    sigma_nat = slices_tab["body_sigma_med"]
+
+    # coppie di dose reale sullo split di validazione interno
+    pairs = dose_pairs(corpus, split["val_inner"])
+    print(f"coppie di dose reale (validazione): {len(pairs)} "
+          f"(torace {int((pairs.region=='torace').sum())}, addome {int((pairs.region=='addome').sum())})")
+
     # indici delle righe utili, per configurazione
     full_rows = meta[meta["source"] == "full"]
     results = []
@@ -123,6 +160,11 @@ def main() -> int:
         cache = FeatureCache(ROOT / "data" / "features" / f"P{P}_C{C:g}")
         sub = full_rows[(full_rows.P == P) & (full_rows.C == C)]
         orig = {r.slice_path: r.Index for r in sub[sub.kind == "original"].itertuples()}
+        pair_moments = image_moments(cache, list(pairs.path_full) + list(pairs.path_low))
+        noise = sub[sub.kind.isin(["noise_white", "noise_fbp", "noise_rel"])].copy()
+        sn = noise["slice_path"].map(sigma_nat).to_numpy(dtype=float)
+        noise["rel"] = np.sqrt(sn ** 2 + noise["sigma_hu"].to_numpy(dtype=float) ** 2) / sn - 1.0
+        noise = noise[(noise["rel"] >= REL_NOISE_MIN) & noise["slice_path"].isin(orig)]
 
         for p in P_GRID:
             try:
@@ -167,6 +209,17 @@ def main() -> int:
             mono_mean = float(np.nanmean(list(mono.values())))
             mono_min = float(np.nanmin(list(mono.values())))
 
+            # --- dose reale ------------------------------------------------
+            dsum = summarize(dose_ordering(model, pairs, pair_moments))
+
+            # --- rumore relativo -------------------------------------------
+            s_n = score_rows(model, NU, SG, list(noise.index))
+            # l'originale deve esistere: un indice di ripiego come -1 leggerebbe
+            # l'ultima riga dell'array, cioe' il punteggio di un'altra immagine
+            s_n0 = score_rows(model, NU, SG, [orig[sp] for sp in noise.slice_path])
+            okn = np.isfinite(s_n) & np.isfinite(s_n0)
+            rel_detect = float((s_n[okn] > s_n0[okn]).mean()) if okn.any() else np.nan
+
             # --- criterio 3: stabilita' -----------------------------------
             d_boot = bootstrap_divergence(cache, by_patient, p, args.bootstrap, args.seed)
             d_med = float(np.nanmedian(d_boot))
@@ -180,6 +233,12 @@ def main() -> int:
 
             results.append({
                 "P": P, "C": C, "p": p,
+                "dose_corretto_min": dsum["corretto_min"],
+                "dose_corretto_torace": dsum["corretto_torace"],
+                "dose_corretto_addome": dsum["corretto_addome"],
+                "dose_n_torace": dsum["n_torace"],
+                "dose_n_addome": dsum["n_addome"],
+                "rumore_rel_rilevato": rel_detect,
                 "n_overfilter_fail": n_fail,
                 "frac_overfilter_fail": frac_fail,
                 "n_blur_fail": n_fail_blur,
@@ -196,7 +255,8 @@ def main() -> int:
                     score_rows(model, NU, SG, list(sub[sub.kind == "original"].index)))),
             })
             r = results[-1]
-            print(f"  P={P:3d} C={C:<5g} p={p:<5.2f} | sovrafiltr.={n_fail:4d} "
+            print(f"  P={P:3d} C={C:<5g} p={p:<5.2f} | dose t/a={dsum['corretto_torace']:.2f}/"
+                  f"{dsum['corretto_addome']:.2f} | rum.rel={rel_detect:.2f} | sovrafiltr.={n_fail:4d} "
                   f"({100*frac_fail:5.1f}%) blur_fail={n_fail_blur:3d} | mono={mono_mean:.3f} "
                   f"(min {mono_min:.3f}) | D_boot={d_med:.4f} | patch/slice={r['fit_patches_per_slice']:6.1f}"
                   f" | cond={model.cond():.1e}", flush=True)
@@ -206,35 +266,67 @@ def main() -> int:
     df.to_csv(out, index=False)
     print(f"\nscritto {out}  ({(time.time()-t0)/60:.1f} min)")
 
-    # --- selezione lessicografica -------------------------------------------
-    print("\n=== selezione lessicografica ===")
+    cols = ["P", "C", "p", "dose_corretto_min", "dose_corretto_torace", "dose_corretto_addome",
+            "rumore_rel_rilevato", "frac_overfilter_fail", "mono_min", "d_boot_median",
+            "fit_patches_per_slice", "score_patches_median", "cond_sigma"]
+
+    # --- 1. criterio ORIGINALE, dichiarato prima di eseguire ----------------
+    print("\n=== criterio originale (dichiarato prima di eseguire) ===")
     safe = df[df["n_overfilter_fail"] == 0]
     if len(safe) == 0:
         print("NESSUNA configurazione e' sicura al sovrafiltraggio (criterio 1 = 0).")
-        print("Questo e' un risultato, non un fallimento della ricerca: va riportato.")
-        print("Ordinamento di ripiego: minore frazione di fallimenti, poi monotonicita'.")
-        ranked = df.sort_values(
+        ranked_o = df.sort_values(
             ["frac_overfilter_fail", "mono_min", "mono_mean", "d_boot_median"],
             ascending=[True, False, False, True])
     else:
-        print(f"configurazioni sicure: {len(safe)}/{len(df)}")
-        ranked = safe.sort_values(
+        ranked_o = safe.sort_values(
             ["mono_min", "mono_mean", "d_boot_median", "fit_patches_per_slice"],
             ascending=[False, False, True, False])
-    cols = ["P", "C", "p", "n_overfilter_fail", "frac_overfilter_fail", "mono_min",
-            "mono_mean", "d_boot_median", "fit_patches_per_slice", "score_patches_median",
-            "cond_sigma"]
-    print(ranked[cols].head(12).to_string(index=False))
+    best_o = ranked_o.iloc[0]
+    print(f"scelta originale: P={int(best_o.P)} C={best_o.C:g} p={best_o.p:g}  "
+          f"(dose t/a {best_o.dose_corretto_torace:.3f}/{best_o.dose_corretto_addome:.3f}, "
+          f"sovrafiltr. {100*best_o.frac_overfilter_fail:.1f}%)")
+
+    # --- 2. criterio RIVISTO -------------------------------------------------
+    print("\n=== criterio rivisto (dose reale prima) ===")
+    passing = df[df["dose_corretto_min"] >= DOSE_PASS]
+    if len(passing):
+        print(f"configurazioni con dose reale ordinata >= {DOSE_PASS:.0%} in entrambe le regioni: "
+              f"{len(passing)}/{len(df)}")
+        ranked = passing.sort_values(
+            ["frac_overfilter_fail", "rumore_rel_rilevato", "d_boot_median", "fit_patches_per_slice"],
+            ascending=[True, False, True, False])
+    else:
+        print(f"NESSUNA configurazione ordina la dose reale >= {DOSE_PASS:.0%} in entrambe le "
+              f"regioni: ordinamento per dose, poi sovrafiltraggio.")
+        ranked = df.sort_values(
+            ["dose_corretto_min", "frac_overfilter_fail", "rumore_rel_rilevato", "d_boot_median"],
+            ascending=[False, True, False, True])
+    print(ranked[cols].head(15).to_string(index=False))
     best = ranked.iloc[0]
+
     (ROOT / "experiments" / "hparam_choice.json").write_text(json.dumps({
         "P": int(best.P), "C": float(best.C), "p": float(best.p),
-        "criterion": "lexicographic: overfilter safety, then step monotonicity, "
-                     "then bootstrap stability, then patches per slice",
-        "declared_before_run": True,
-        "any_safe_config": bool(len(safe) > 0),
+        "criterion": ("revised: real-dose ordering (min over chest/abdomen, pass >= 0.95), "
+                      "then overfiltering failure fraction, then relative-noise detection, "
+                      "then bootstrap stability, then patches per slice"),
+        "declared_before_run": False,
+        "revision_reason": ("the pre-declared criterion ignored real-dose ordering and selected "
+                            "a configuration ordering reduced-dose abdomen correctly in 38.5% "
+                            "of validation pairs; revised after seeing validation data, "
+                            "with the commissioner's explicit agreement (docs/06)"),
+        "any_config_passes_dose": bool(len(passing) > 0),
+        "any_safe_config_overfiltering": bool(len(safe) > 0),
         "metrics": {k: (float(best[k]) if k in best else None) for k in cols},
+        "original_criterion_choice": {
+            "P": int(best_o.P), "C": float(best_o.C), "p": float(best_o.p),
+            "criterion": "lexicographic: overfilter safety, then step monotonicity, "
+                         "then bootstrap stability, then patches per slice",
+            "declared_before_run": True,
+            "metrics": {k: (float(best_o[k]) if k in best_o else None) for k in cols},
+        },
     }, indent=1))
-    print(f"\nscelta: P={int(best.P)} C={best.C:g} p={best.p:g}")
+    print(f"\nscelta (criterio rivisto): P={int(best.P)} C={best.C:g} p={best.p:g}")
     return 0
 
 

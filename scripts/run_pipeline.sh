@@ -39,8 +39,15 @@ step banco_val experiments/bank_val_inner.json \
 step momenti_val experiments/bank_val_inner_moments.npz \
   $PY scripts/score_bank.py --bank experiments/bank_val_inner.json --workers "$W"
 
+# griglia di C estesa verso il basso (0,05 / 0,025 / 0,01): il meccanismo
+# del livello di rumore preferito passa per C (docs/05 §8.3)
+step momenti_val_lowC experiments/bank_val_inner_moments_lowC.npz \
+  $PY scripts/score_bank.py --bank experiments/bank_val_inner.json --workers "$W" \
+     --P 16,24,32 --C 0.05,0.025,0.01 --out experiments/bank_val_inner_moments_lowC.npz
+
 step ricerca_iperparametri experiments/hparam_choice.json \
-  $PY scripts/search_hparams.py --moments experiments/bank_val_inner_moments.npz --bootstrap 60
+  $PY scripts/search_hparams.py --bootstrap 60 --moments \
+     experiments/bank_val_inner_moments.npz experiments/bank_val_inner_moments_lowC.npz
 
 step fit_modello artifacts/riqe-v1.0.json \
   $PY scripts/fit_model.py
@@ -49,10 +56,15 @@ step stratificazione experiments/stratification.csv \
   $PY scripts/stratification.py --B 200
 
 step banco_test experiments/bank_test.json \
-  $PY scripts/prepare_bank.py --split test --per-patient 6 --fine-noise --workers "$W"
+  $PY scripts/prepare_bank.py --split test --per-patient 6 --fine-noise --rel-noise --workers "$W"
+
+# su TEST servono solo la configurazione scelta e quella del criterio originale
+PLIST=$($PY -c "import json;c=json.load(open('experiments/hparam_choice.json'));o=c['original_criterion_choice'];print(','.join(sorted({str(c['P']),str(o['P'])})))")
+CLIST=$($PY -c "import json;c=json.load(open('experiments/hparam_choice.json'));o=c['original_criterion_choice'];print(','.join(sorted({repr(float(c['C'])),repr(float(o['C']))})))")
+echo "[$(date +%H:%M:%S)] configurazioni per TEST: P=$PLIST C=$CLIST"
 
 step momenti_test experiments/bank_test_moments.npz \
-  $PY scripts/score_bank.py --bank experiments/bank_test.json --workers "$W"
+  $PY scripts/score_bank.py --bank experiments/bank_test.json --workers "$W" --P "$PLIST" --C "$CLIST"
 
 step batteria experiments/battery_summary.json \
   $PY scripts/run_battery.py --moments experiments/bank_test_moments.npz --bootstrap 200

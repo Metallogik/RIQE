@@ -59,6 +59,69 @@ OUT = ROOT / "experiments"
 
 
 # ---------------------------------------------------------------------------
+# 0. Dose reale  (aggiunto dopo la validazione: docs/05 §8, docs/06)
+# ---------------------------------------------------------------------------
+
+def exp0_real_dose(P, C, p, model, d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """La dose ridotta reale deve peggiorare il punteggio: e' il caso d'uso."""
+    from riqe.dosetest import dose_ordering, dose_pairs, image_moments, summarize
+
+    print("\n" + "=" * 78)
+    print("ESPERIMENTO 0 - DOSE RIDOTTA REALE CONTRO DOSE PIENA, STESSA SLICE")
+    print("=" * 78)
+    corpus = pd.read_parquet(ROOT / "corpus" / "corpus.parquet")
+    split = json.load(open(ROOT / "corpus" / "split.json"))
+    cache = FeatureCache(ROOT / "data" / "features" / f"P{P}_C{C:g}")
+    pairs = dose_pairs(corpus, split["test"])
+    res = dose_ordering(model, pairs, image_moments(cache, list(pairs.path_full) + list(pairs.path_low)))
+    sm = summarize(res)
+    print(f"  coppie TEST: {sm['n_coppie']} punteggiabili "
+          f"(torace {sm['n_torace']}, addome {sm['n_addome']}; non punteggiabili {sm['n_non_punteggiabili']})")
+    print(f"  dose ridotta con punteggio peggiore (corretto):  torace {100*sm['corretto_torace']:.1f}%   "
+          f"addome {100*sm['corretto_addome']:.1f}%   tutte {100*sm['corretto_tutte']:.1f}%")
+    ok = res.dropna(subset=["score_full", "score_low"])
+    for reg in ("torace", "addome"):
+        g = ok[ok.region == reg]
+        if len(g):
+            print(f"    {reg}: delta mediano {np.median(g.score_low - g.score_full):+.4f}")
+    res.to_csv(OUT / "exp0_real_dose.csv", index=False)
+    return res, sm
+
+
+# ---------------------------------------------------------------------------
+# 1b. Rumore relativo al rumore nativo  (aggiunto dopo la validazione)
+# ---------------------------------------------------------------------------
+
+def exp1b_relative_noise(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    print("\n" + "=" * 78)
+    print("ESPERIMENTO 1b - RUMORE AGGIUNTO RELATIVO AL RUMORE NATIVO")
+    print("=" * 78)
+    g = d[(d.kind == "noise_rel") & (d.source == "full")].copy()
+    if g.empty:
+        print("  nessuna voce noise_rel nel banco")
+        return pd.DataFrame(), {}
+    orig = {r.slice_path: r.score for r in d[(d.kind == "original") & (d.source == "full")].itertuples()}
+    g["base"] = g.slice_path.map(orig)
+    g = g.dropna(subset=["score", "base"])
+    g["peggiora"] = g.score > g.base
+    g["regione"] = np.where(g.cell.str.contains("CHEST"), "torace", "addome")
+    t = g.pivot_table(index="regione", columns="rel_increase", values="peggiora", aggfunc="mean")
+    print("  frazione in cui il punteggio peggiora, per aumento relativo del rumore:")
+    print((100 * t).round(1).to_string())
+    perfect = total = 0
+    for sp, gg in g.groupby("slice_path"):
+        seq = np.concatenate([[orig[sp]], gg.sort_values("rel_increase").score.to_numpy()])
+        if np.isfinite(seq).all():
+            total += 1
+            perfect += int(step_monotone(seq))
+    print(f"  monotone a ogni passo: {perfect}/{total} ({100*perfect/max(total,1):.1f}%)")
+    g.to_csv(OUT / "exp1b_relative_noise.csv", index=False)
+    return g, {"peggiora_per_livello": {f"{k}": {f"{c:g}": float(v) for c, v in row.items()}
+                                        for k, row in t.iterrows()},
+               "frazione_monotone": perfect / max(total, 1)}
+
+
+# ---------------------------------------------------------------------------
 # 1. Monotonicita'
 # ---------------------------------------------------------------------------
 
@@ -376,8 +439,11 @@ def main() -> int:
     t0 = time.time()
     summaries = {}
     skip = set(args.skip.split(","))
+    if "0" not in skip:
+        _, summaries["esp0_dose_reale"] = exp0_real_dose(P, C, p, model, d)
     if "1" not in skip:
         _, summaries["esp1_monotonicita"] = exp1_monotonicity(d)
+        _, summaries["esp1b_rumore_relativo"] = exp1b_relative_noise(d)
     if "2" not in skip:
         _, summaries["esp2_sovrafiltraggio"] = exp2_overfiltering(d)
     if "3" not in skip:

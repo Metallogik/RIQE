@@ -40,12 +40,15 @@ class BankEntry:
     strength: float | None = None
     residual_hu: float | None = None
     target_reached: bool | None = None
+    rel_increase: float | None = None
 
     def label(self) -> str:
         if self.kind == "original":
             return f"{self.source}:original"
         if self.kind in ("noise_white", "noise_fbp"):
             return f"{self.source}:{self.kind}:{self.sigma_hu:g}HU"
+        if self.kind == "noise_rel":
+            return f"{self.source}:noise_rel:+{100 * self.rel_increase:g}%"
         if self.kind == "blur":
             return f"{self.source}:blur:{self.sigma_px:g}px"
         return f"{self.source}:{self.denoiser}:res{self.target_residual_hu:g}HU"
@@ -60,7 +63,7 @@ def render(entry: BankEntry, hu: np.ndarray) -> np.ndarray:
         return hu.astype(np.float32, copy=True)
     if entry.kind == "noise_white":
         return dg.add_white_noise(hu, entry.sigma_hu, np.random.default_rng(entry.seed))
-    if entry.kind == "noise_fbp":
+    if entry.kind in ("noise_fbp", "noise_rel"):
         return dg.add_fbp_noise(hu, entry.sigma_hu, np.random.default_rng(entry.seed))
     if entry.kind == "blur":
         return dg.blur(hu, entry.sigma_px)
@@ -69,6 +72,25 @@ def render(entry: BankEntry, hu: np.ndarray) -> np.ndarray:
             raise ValueError("voce denoise senza forza calibrata")
         return dg.apply_denoiser(hu, entry.denoiser, entry.strength)
     raise ValueError(f"tipo di voce sconosciuto: {entry.kind}")
+
+
+_K_FBP: float | None = None
+
+
+def _fbp_local_ratio() -> float:
+    """Rapporto fra sigma locale mediana e sigma globale del rumore FBP
+    sintetico, stimato una volta su realizzazioni a seme fisso."""
+    global _K_FBP
+    if _K_FBP is None:
+        from .nss import local_stats
+
+        ks = []
+        for seed in range(3):
+            n = dg.add_fbp_noise(np.zeros((512, 512), np.float32), 1.0, np.random.default_rng(seed))
+            _, s = local_stats(n)
+            ks.append(float(np.median(s)))
+        _K_FBP = float(np.mean(ks))
+    return _K_FBP
 
 
 def build_bank(
@@ -81,6 +103,7 @@ def build_bank(
     residual_levels=dg.RESIDUAL_LEVELS_HU,
     denoisers=tuple(dg.DENOISERS),
     noise_fine=(),
+    noise_rel=(),
 ) -> list[BankEntry]:
     """Costruisce il banco per una slice, calibrando le forze dei filtri.
 
@@ -98,6 +121,26 @@ def build_bank(
             entries.append(
                 BankEntry(kind="noise_fbp", source=source, sigma_hu=float(s), seed=seed + 2000 + i)
             )
+    if noise_rel:
+        # Scala di rumore RELATIVA al rumore nativo della slice.  La scala in
+        # HU assoluti confonde i protocolli: 5 HU su un torace con 60 HU di
+        # rumore nativo sono meno dell'1% di aumento, fisicamente non
+        # rilevabili (docs/05 §8.1).  Qui l'aumento r del rumore totale e'
+        # lo stesso per ogni slice: sigma_agg = sigma_nat * sqrt((1+r)^2 - 1).
+        from .nss import local_stats
+
+        _, sig = local_stats(hu)
+        sigma_nat = float(np.median(sig[body])) if body.any() else float("nan")
+        # sigma_nat e' misurata con lo stimatore locale (finestra 7x7), che
+        # di un rumore correlato vede solo una parte: per il rumore tipo FBP
+        # sintetico, sigma locale = 0,637 sigma globale (misurato, stabile a
+        # +-0,002).  Il rumore da aggiungere va quindi espresso nelle stesse
+        # unita' della misura, altrimenti un +100% richiesto diventa +55%.
+        k = _fbp_local_ratio()
+        for i, r in enumerate(noise_rel):
+            s_add = sigma_nat * float(np.sqrt((1.0 + r) ** 2 - 1.0)) / k
+            entries.append(BankEntry(kind="noise_rel", source=source, sigma_hu=s_add,
+                                     seed=seed + 3000 + i, rel_increase=float(r)))
     for name in denoisers:
         for lvl in residual_levels:
             st, res, _ = dg.calibrate_strength(hu, name, float(lvl), body)

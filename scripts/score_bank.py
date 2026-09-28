@@ -86,6 +86,7 @@ def _one(rec: dict):
                     "residual_hu": e.residual_hu,
                     "sigma_hu": e.sigma_hu,
                     "sigma_px": e.sigma_px,
+                    "rel_increase": e.rel_increase,
                     "P": P,
                     "C": C,
                     "n_patches": n,
@@ -126,7 +127,7 @@ def main() -> int:
     # serializzazione compatta: array numpy invece di JSON per i momenti
     rows = [r2 for r in recs for r2 in r["rows"]]
     meta_keys = ["source", "label", "kind", "denoiser", "target_residual_hu",
-                 "residual_hu", "sigma_hu", "sigma_px", "P", "C", "n_patches"]
+                 "residual_hu", "sigma_hu", "sigma_px", "rel_increase", "P", "C", "n_patches"]
     slice_of = []
     for r in recs:
         slice_of += [r["path"]] * len(r["rows"])

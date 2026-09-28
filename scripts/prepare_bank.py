@@ -41,11 +41,16 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "experiments"
 
 _FINE = False
+_REL = False
+
+#: aumenti relativi del rumore nativo per la scala relativa
+REL_LEVELS = (0.05, 0.10, 0.20, 0.50, 1.00)
 
 
-def _init(fine: bool) -> None:
-    global _FINE
+def _init(fine: bool, rel: bool = False) -> None:
+    global _FINE, _REL
     _FINE = fine
+    _REL = rel
 
 
 def _one(job: tuple):
@@ -56,6 +61,7 @@ def _one(job: tuple):
     entries = build_bank(
         hu, body, source="full", seed=seed,
         noise_fine=dg.NOISE_FINE_HU if _FINE else (),
+        noise_rel=REL_LEVELS if _REL else (),
     )
     rec = {
         "path": path,
@@ -97,6 +103,8 @@ def main() -> int:
     ap.add_argument("--per-patient", type=int, default=4)
     ap.add_argument("--fine-noise", action="store_true",
                     help="aggiunge la scala fine di rumore da zero (forma 3 del test)")
+    ap.add_argument("--rel-noise", action="store_true",
+                    help="aggiunge la scala di rumore relativa al rumore nativo")
     ap.add_argument("--workers", type=int, default=24)
     ap.add_argument("--seed", type=int, default=20260917)
     ap.add_argument("--out", default=None)
@@ -134,7 +142,7 @@ def main() -> int:
     t0 = time.time()
     recs = []
     with cf.ProcessPoolExecutor(args.workers, initializer=_init,
-                                initargs=(args.fine_noise,)) as ex:
+                                initargs=(args.fine_noise, args.rel_noise)) as ex:
         for i, rec in enumerate(ex.map(_one, jobs, chunksize=1), 1):
             recs.append(rec)
             if i % 20 == 0:
