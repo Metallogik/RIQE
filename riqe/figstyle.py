@@ -38,7 +38,7 @@ SEQUENTIAL = ("#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", 
 #: divergente, poli caldo/freddo con grigio neutro al centro
 DIVERGING = ("#0d366b", "#256abf", "#86b6ef", "#f0efec", "#f19b9a", "#e34948", "#8f2322")
 
-SURFACE = "#fcfcfb"
+SURFACE = "#ffffff"  # bianco: le figure sono per la stampa
 INK = "#0b0b0b"
 INK_2 = "#52514e"
 INK_MUTED = "#8a8880"

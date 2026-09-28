@@ -26,17 +26,27 @@ non sa cosa sia una lesione.
 
 ## Stato
 
-| Fase | Stato |
-|---|---|
-| Verifica accesso dati e licenze | fatta, vedi [docs/00](docs/00-data-access-and-license.md) |
-| Specifica algoritmo dall'articolo primario | fatta, vedi [docs/02](docs/02-spec-niqe.md) |
-| Disegno sperimentale concordato | fatto, vedi [docs/01](docs/01-proposta.md) |
-| Estrattore, fitter, degradazioni, banco di prova | implementati |
-| Corpus scaricato | 299 serie, 72.588 slice, 36 GB |
-| Ricerca iperparametri, fitting, batteria | in corso |
+**Completato.** Modello, validazione su 40 pazienti mai visti, articolo.
 
-Raffinamenti emersi dall'implementazione, con i numeri che li hanno imposti:
-[docs/03](docs/03-scoperte-in-implementazione.md).
+| | |
+|---|---|
+| Articolo | [paper/riqe.pdf](paper/riqe.pdf), sorgente [paper/riqe.tex](paper/riqe.tex), pacchetto arXiv [paper/riqe_arxiv_source.tar.gz](paper/riqe_arxiv_source.tar.gz) |
+| Modello | `artifacts/riqe-v1.0.{json,npz}` — P=24, C=0,01, p=0,50, 121.213 patch da 3.792 slice di 158 pazienti |
+| Riproducibilità | `scripts/verify_model.py`: il fit rifatto dai dati pubblici coincide al bit |
+| Decisioni | [docs/06-decisioni.md](docs/06-decisioni.md) |
+
+**In una frase:** RIQE rileva bene le immagini TC degradate (dose ridotta reale,
+rumore, sfocatura) ma **non va usato per scegliere, confrontare o tarare un
+denoising**, perché premia i filtri che preservano i bordi anche quando hanno
+cancellato buona parte del segnale di una lesione piccola a basso contrasto.
+
+| su TEST (40 pazienti) | |
+|---|---|
+| dose ridotta reale riconosciuta come peggiore | torace 100%, addome 96,9% |
+| rumore +20% del nativo rilevato | 97,5–100% |
+| correlazione con 5 radiologi (LDCTIQAC 2023) | Spearman −0,51 (modello fotografico −0,17) |
+| immagini filtrate che battono l'originale | 41,2% |
+| bilaterale preferito all'immagine non filtrata, con il 70% del segnale di una lesione di 4 mm rimasto | 100% dei casi |
 
 ## Dati
 

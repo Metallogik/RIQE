@@ -192,39 +192,54 @@ def fig_noise_optimum() -> None:
     save(fig, "fig3_ottimo_di_rumore")
 
 
+STRAT_LABELS = [
+    ("A:", "Abdomen 5 mm: GE STANDARD vs Siemens B30f"),
+    ("B:", "Chest: GE STANDARD 1.25 mm vs Siemens B50f 1.5 mm"),
+    ("C:", "GE: chest 1.25 mm vs abdomen 5 mm"),
+    ("D:", "Siemens: chest B50f 1.5 mm vs abdomen B30f 5 mm"),
+    ("G:", "All chest vs all abdomen (confounded)"),
+    ("H:", "Vendor: all GE vs all Siemens"),
+]
+
+
+def _strat_label(c: str) -> str:
+    for k, v in STRAT_LABELS:
+        if c.startswith(k):
+            return v
+    if c.startswith("E:"):
+        cell = c.split("—")[-1].strip().split("|")
+        v = {"GE": "GE", "SIEMENS": "Siemens"}.get(cell[0], cell[0])
+        return f"Pixel spacing tertiles: {v} {cell[1].lower()}"
+    return c
+
+
 def fig_stratification() -> None:
     f = EXP / "stratification.csv"
     if not f.exists():
         print("  salto stratificazione: manca stratification.csv")
         return
-    d = pd.read_csv(f).sort_values("eta")
+    d = pd.read_csv(f)
+    anchor = d[d["asse"] == "dose"].iloc[0]
+    d = d[d["asse"] != "dose"].sort_values("D_oss")
     y = np.arange(len(d))
-    fig, ax = plt.subplots(figsize=(7.4, 0.42 * len(d) + 1.9))
-    # banda del nullo di permutazione: da mediana a p95
+    fig, ax = plt.subplots(figsize=(7.2, 0.40 * len(d) + 1.6))
     for i, r in enumerate(d.itertuples()):
-        ax.plot([r.nullo_mediana, r.nullo_p95], [i, i], color=fs.GRID, lw=6,
+        ax.plot([r.nullo_mediana, r.nullo_p95], [i, i], color=fs.GRID, lw=7,
                 solid_capstyle="butt", zorder=1)
-    ax.scatter(d["nullo_mediana"], y, s=22, color=fs.INK_MUTED, marker="|",
-               zorder=2, label="nullo di permutazione (mediana - p95)")
-    anchor = d["asse"] == "dose"
-    ax.scatter(d.loc[~anchor, "D_oss"], y[~anchor.to_numpy()], s=46,
-               color=fs.SERIES[0], marker="o", zorder=3, label="divergenza osservata")
-    ax.scatter(d.loc[anchor, "D_oss"], y[anchor.to_numpy()], s=64,
-               color=fs.SERIES[1], marker="D", zorder=3,
-               label="ancora: dose piena vs ridotta")
+    ax.axvline(anchor.D_oss, color=fs.SERIES[1], lw=1.6, ls="--", zorder=2)
+    ax.annotate("real dose reduction\n(same patients)", xy=(anchor.D_oss, len(d) - 0.6),
+                xytext=(6, 0), textcoords="offset points", fontsize=7.5,
+                color=fs.INK_2, va="top")
+    ax.scatter(d["D_oss"], y, s=40, color=fs.SERIES[0], zorder=3)
     ax.set_yticks(y)
-    ax.set_yticklabels([c[:58] for c in d["contrasto"]], fontsize=7.5)
-    ax.set_xlabel("divergenza fra modelli D (stesse unita' del punteggio)")
-    ax.set_title("Quanto divergono i sotto-modelli, fra rumore di campionamento\n"
-                 "e una differenza fisica nota", fontsize=9)
-    for i, r in enumerate(d.itertuples()):
-        if np.isfinite(r.eta):
-            ax.annotate(f"eta={r.eta:+.2f}", xy=(r.D_oss, i), xytext=(7, 0),
-                        textcoords="offset points", fontsize=7, color=fs.INK_2, va="center")
-    ax.legend(loc="lower right", fontsize=7.5)
+    ax.set_yticklabels([_strat_label(c) for c in d["contrasto"]], fontsize=7.5)
+    ax.set_xlabel("divergence between the two sub-models, D (score units)")
+    ax.set_xlim(0, max(d["D_oss"].max(), anchor.D_oss) * 1.08)
+    ax.set_title("Divergence between sub-models, against sampling noise (grey)\n"
+                 "and a real dose reduction (dashed)", fontsize=9.5)
     fs.despine(ax)
     fig.tight_layout()
-    save(fig, "fig4_stratificazione")
+    save(fig, "fig_stratification")
 
 
 def fig_photo_baseline() -> None:
@@ -273,20 +288,30 @@ def fig_stability() -> None:
         print("  salto stabilita': manca exp4_learning_curve.csv")
         return
     d = pd.read_csv(f)
-    fig, ax = plt.subplots(figsize=(5.4, 3.4))
+    d = d[d["n_pazienti"] < d["n_pazienti"].max()]  # l'ultimo punto e' 0 per costruzione
+    fig, ax = plt.subplots(figsize=(5.2, 3.3))
     ax.plot(d["n_pazienti"], d["D_mediana"], **fs.style_for(0))
     ax.fill_between(d["n_pazienti"], d["D_mediana"], d["D_p95"],
                     color=fs.SERIES[0], alpha=0.14, linewidth=0)
-    ax.set_xlabel("pazienti nel corpus di fitting")
-    ax.set_ylabel("D dal modello completo")
-    ax.set_title("Quanti pazienti bastano", fontsize=9)
+    try:
+        st = pd.read_csv(EXP / "stratification.csv")
+        a = float(st[st["asse"] == "dose"]["D_oss"].iloc[0])
+        ax.axhline(a, color=fs.SERIES[1], lw=1.4, ls="--")
+        ax.annotate("real dose reduction", xy=(d["n_pazienti"].min(), a), xytext=(2, 4),
+                    textcoords="offset points", fontsize=7.5, color=fs.INK_2)
+    except Exception:  # noqa: BLE001
+        pass
+    ax.set_xlabel("patients in the fitting corpus")
+    ax.set_ylabel("D from the full model")
+    ax.set_title("How many patients are enough", fontsize=9.5)
     ax.set_xscale("log")
     ax.set_xticks(d["n_pazienti"])
     ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
     ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+    ax.set_ylim(0, None)
     fs.despine(ax)
     fig.tight_layout()
-    save(fig, "fig6_stabilita")
+    save(fig, "fig_stability")
 
 
 def main() -> int:
