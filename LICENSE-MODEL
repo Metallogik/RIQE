@@ -1,0 +1,33 @@
+Il modello RIQE (vettore medio, covarianza, manifest del corpus, iperparametri)
+e i risultati sperimentali sono rilasciati sotto
+
+    Creative Commons Attribution 4.0 International (CC BY 4.0)
+    https://creativecommons.org/licenses/by/4.0/
+
+Copyright (c) 2026 Metallogik
+
+Uso commerciale e opere derivate sono permessi, con obbligo di attribuzione.
+
+ATTRIBUZIONI EREDITATE, DA RIPORTARE IN OGNI USO DEL MODELLO
+
+Il modello e' fittato su dati pubblici di The Cancer Imaging Archive,
+distribuiti anch'essi sotto CC BY 4.0.  Chi usa il modello deve citare:
+
+  McCollough, C., Chen, B., Holmes III, D., Duan, X., Yu, Z., Yu, L.,
+  Leng, S., Fletcher, J. (2020). Low Dose CT Image and Projection Data
+  (LDCT-and-Projection-data) (Version 7) [dataset]. The Cancer Imaging
+  Archive. https://doi.org/10.7937/9npb-2637
+
+  Clark, K., Vendt, B., Smith, K., et al. (2013). The Cancer Imaging Archive
+  (TCIA): Maintaining and Operating a Public Information Repository.
+  Journal of Digital Imaging, 26(6), 1045-1057.
+
+e riconoscere i finanziamenti NIBIB EB017095 ed EB017185
+(PI: Cynthia McCollough).
+
+L'algoritmo e' implementato dall'articolo seguente, che va citato come fonte
+dell'algoritmo (nessun codice di terzi e' incorporato):
+
+  Mittal, A., Soundararajan, R., Bovik, A. C. (2013). Making a "Completely
+  Blind" Image Quality Analyzer. IEEE Signal Processing Letters, 20(3),
+  209-212.
