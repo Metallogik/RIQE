@@ -89,8 +89,11 @@ def _one(rec: dict):
                     "P": P,
                     "C": C,
                     "n_patches": n,
-                    "nu": None if nu is None else nu.astype(np.float32).tolist(),
-                    "sigma": None if sg is None else sg.astype(np.float32).ravel().tolist(),
+                    # array numpy, non liste Python: una lista di 1296 float
+                    # costa ~30 byte per elemento, e con 288.000 righe sul
+                    # banco TEST sarebbero oltre 10 GB nel processo padre
+                    "nu": None if nu is None else nu.astype(np.float32),
+                    "sigma": None if sg is None else sg.astype(np.float32),
                 })
     out["seconds"] = time.time() - t0
     return out
@@ -132,7 +135,7 @@ def main() -> int:
     for i, r in enumerate(rows):
         if r["nu"] is not None:
             NU[i] = r["nu"]
-            SG[i] = np.asarray(r["sigma"], np.float32).reshape(36, 36)
+            SG[i] = r["sigma"]
 
     out = Path(args.out or (Path(args.bank).with_suffix("").as_posix() + "_moments.npz"))
     np.savez_compressed(
