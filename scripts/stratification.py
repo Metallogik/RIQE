@@ -76,7 +76,7 @@ def slices_by_patient(df: pd.DataFrame) -> dict[str, list[str]]:
 
 def fit_group(cache, by_patient, pids, p):
     paths = [q for pid in pids for q in by_patient.get(pid, [])]
-    return cache.fit(paths, p, n_patients=len(pids))
+    return cache.fit_fast(paths, p, n_patients=len(pids))
 
 
 def permutation_null(cache, by_patient, pids_a, pids_b, p, B, seed):
@@ -104,8 +104,8 @@ def paired_dose_anchor(cache, full_by_patient, low_by_patient, pids, p, B, seed)
     equivalenti.
     """
     rng = np.random.default_rng(seed)
-    m_full = cache.fit([q for pid in pids for q in full_by_patient[pid]], p, n_patients=len(pids))
-    m_low = cache.fit([q for pid in pids for q in low_by_patient[pid]], p, n_patients=len(pids))
+    m_full = cache.fit_fast([q for pid in pids for q in full_by_patient[pid]], p, n_patients=len(pids))
+    m_low = cache.fit_fast([q for pid in pids for q in low_by_patient[pid]], p, n_patients=len(pids))
     d_obs = model_divergence(m_full, m_low)
     null = []
     for _ in range(B):
@@ -119,7 +119,7 @@ def paired_dose_anchor(cache, full_by_patient, low_by_patient, pids, p, B, seed)
                 b += full_by_patient[pid]
         try:
             null.append(model_divergence(
-                cache.fit(a, p, n_patients=len(pids)), cache.fit(b, p, n_patients=len(pids))))
+                cache.fit_fast(a, p, n_patients=len(pids)), cache.fit_fast(b, p, n_patients=len(pids))))
         except ValueError:
             null.append(np.nan)
     return d_obs, np.asarray(null), m_full, m_low

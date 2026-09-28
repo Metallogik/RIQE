@@ -255,7 +255,7 @@ def exp4_stability(P, C, p, B, seed, d_test, NU, SG) -> tuple[pd.DataFrame, dict
     cache = FeatureCache(ROOT / "data" / "features" / f"P{P}_C{C:g}")
 
     allp = [q for pid in fit_pids for q in by_patient[pid]]
-    full_model = cache.fit(allp, p, n_patients=len(fit_pids))
+    full_model = cache.fit_fast(allp, p, n_patients=len(fit_pids))
     print(f"  modello completo: {len(fit_pids)} pazienti, {full_model.n_patches} patch, "
           f"cond={full_model.cond():.3e}")
 
@@ -263,7 +263,7 @@ def exp4_stability(P, C, p, B, seed, d_test, NU, SG) -> tuple[pd.DataFrame, dict
     d_boot, boot_models = [], []
     for _ in range(B):
         take = rng.choice(fit_pids, size=len(fit_pids), replace=True)
-        m = cache.fit([q for pid in take for q in by_patient[pid]], p, n_patients=len(fit_pids))
+        m = cache.fit_fast([q for pid in take for q in by_patient[pid]], p, n_patients=len(fit_pids))
         d_boot.append(model_divergence(full_model, m))
         boot_models.append(m)
     d_boot = np.asarray(d_boot)
@@ -272,8 +272,8 @@ def exp4_stability(P, C, p, B, seed, d_test, NU, SG) -> tuple[pd.DataFrame, dict
 
     d_lopo = []
     for pid in fit_pids:
-        m = cache.fit([q for q2 in fit_pids if q2 != pid for q in by_patient[q2]], p,
-                      n_patients=len(fit_pids) - 1)
+        m = cache.fit_fast([q for q2 in fit_pids if q2 != pid for q in by_patient[q2]], p,
+                           n_patients=len(fit_pids) - 1)
         d_lopo.append({"patient_id": pid, "D": model_divergence(full_model, m)})
     lopo = pd.DataFrame(d_lopo).sort_values("D", ascending=False)
     print(f"  leave-one-patient-out: D mediana {lopo.D.median():.5f}, "
@@ -290,7 +290,7 @@ def exp4_stability(P, C, p, B, seed, d_test, NU, SG) -> tuple[pd.DataFrame, dict
         ds = []
         for rep in range(10):
             take = np.random.default_rng(seed + rep).choice(fit_pids, size=n, replace=False)
-            m = cache.fit([q for pid in take for q in by_patient[pid]], p, n_patients=n)
+            m = cache.fit_fast([q for pid in take for q in by_patient[pid]], p, n_patients=n)
             ds.append(model_divergence(full_model, m))
         curve.append({"n_pazienti": n, "D_mediana": float(np.median(ds)),
                       "D_p95": float(np.percentile(ds, 95))})

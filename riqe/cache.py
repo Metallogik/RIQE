@@ -44,6 +44,7 @@ class FeatureCache:
         self.index: list[dict] = json.loads((d / "index.json").read_text())
         self.info: dict = json.loads((d / "info.json").read_text())
         self.by_path: dict[str, dict] = {canonical(e["path"]): e for e in self.index}
+        self._stats: dict = {}
 
     @property
     def P(self) -> int:
@@ -64,6 +65,66 @@ class FeatureCache:
         if p is None or f.shape[0] == 0:
             return f
         return f[d > p * d.max()]
+
+    # -- statistiche sufficienti ------------------------------------------
+    #
+    # Media e covarianza di un gruppo di slice dipendono solo da tre
+    # quantita' per slice: il numero di patch, la somma dei vettori e la
+    # somma dei prodotti esterni.  Precalcolarle rende ogni rifit una
+    # aggregazione di 36 + 1296 numeri per slice invece di una rilettura e
+    # concatenazione di centinaia di migliaia di patch.  Serve perche' la
+    # ricerca degli iperparametri rifitta 96 volte per 60 bootstrap, e la
+    # stratificazione 200 volte per contrasto: senza, sono ore.
+
+    def stats(self, p: float | None) -> dict[str, tuple[int, np.ndarray, np.ndarray]]:
+        """(n, somma, somma dei prodotti esterni) per slice, alla soglia `p`."""
+        key = ("all" if p is None else round(float(p), 6))
+        if key not in self._stats:
+            out = {}
+            for e in self.index:
+                path = canonical(e["path"])
+                f = self.select(path, p).astype(np.float64)
+                if f.shape[0] == 0:
+                    continue
+                out[path] = (int(f.shape[0]), f.sum(axis=0), f.T @ f)
+            self._stats[key] = out
+        return self._stats[key]
+
+    def fit_fast(self, paths, p: float | None, n_patients: int = 0,
+                 meta: dict | None = None) -> MVGModel:
+        """Come `fit`, ma dalle statistiche sufficienti.
+
+        Risultato identico a `fit` entro l'errore di arrotondamento: la
+        covarianza e' calcolata come (S2 - N mu mu^T) / (N - 1), la stessa
+        stima non distorta di np.cov con ddof=1.
+        """
+        st = self.stats(p)
+        n = 0
+        s1 = np.zeros(self.n_features)
+        s2 = np.zeros((self.n_features, self.n_features))
+        n_img = 0
+        for q in (canonical(x) for x in paths):
+            v = st.get(q)
+            if v is None:
+                continue
+            n += v[0]
+            s1 += v[1]
+            s2 += v[2]
+            n_img += 1
+        if n <= self.n_features:
+            raise ValueError(
+                f"solo {n} patch per {self.n_features} feature: soglia p troppo alta?")
+        mu = s1 / n
+        cov = (s2 - n * np.outer(mu, mu)) / (n - 1)
+        m = dict(meta or {})
+        m.update({"P": self.P, "C": self.C, "p": p,
+                  "patches_per_slice": float(n / max(n_img, 1))})
+        return MVGModel(nu=mu, sigma=cov, n_patches=n, n_images=n_img,
+                        n_patients=n_patients, meta=m)
+
+    @property
+    def n_features(self) -> int:
+        return int(self.features.shape[1])
 
     def fit(self, paths, p: float | None, n_patients: int = 0, meta: dict | None = None) -> MVGModel:
         """Fit del modello sulle slice indicate, alla soglia `p`."""

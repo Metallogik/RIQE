@@ -78,13 +78,13 @@ def bootstrap_divergence(cache, paths_by_patient, p, B, seed) -> np.ndarray:
     rng = np.random.default_rng(seed)
     pids = sorted(paths_by_patient)
     allp = [q for pid in pids for q in paths_by_patient[pid]]
-    full = cache.fit(allp, p, n_patients=len(pids))
+    full = cache.fit_fast(allp, p, n_patients=len(pids))
     ds = []
     for _ in range(B):
         take = rng.choice(pids, size=len(pids), replace=True)
         paths = [q for pid in take for q in paths_by_patient[pid]]
         try:
-            ds.append(model_divergence(full, cache.fit(paths, p, n_patients=len(pids))))
+            ds.append(model_divergence(full, cache.fit_fast(paths, p, n_patients=len(pids))))
         except ValueError:
             ds.append(np.nan)
     return np.asarray(ds)
@@ -126,8 +126,8 @@ def main() -> int:
 
         for p in P_GRID:
             try:
-                model = cache.fit([q for v in by_patient.values() for q in v], p,
-                                  n_patients=len(by_patient))
+                model = cache.fit_fast([q for v in by_patient.values() for q in v], p,
+                                       n_patients=len(by_patient))
             except ValueError as e:
                 results.append({"P": P, "C": C, "p": p, "error": str(e)})
                 continue
