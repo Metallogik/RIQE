@@ -14,6 +14,15 @@ dichiarata): le altre non sono usabili ne' in fitting ne' in punteggio.
 
 from __future__ import annotations
 
+import os
+
+# Un thread per processo: il parallelismo lo diamo con i processi, e lasciare
+# che ogni worker apra i propri thread BLAS porta a oversubscription (load 90
+# su 32 core, misurato) invece che a velocita'. Va fatto prima di numpy.
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+           "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ.setdefault(_v, "1")
+
 import argparse
 import concurrent.futures as cf
 import json
@@ -72,7 +81,8 @@ def build(P: int, C: float, paths: list[str], workers: int) -> dict:
         for i, (path, f, d, ntot) in enumerate(ex.map(_one, paths, chunksize=8), 1):
             feats.append(f)
             deltas.append(d)
-            index.append({"path": path, "start": row, "n": int(f.shape[0]), "n_patch_total": ntot})
+            index.append({"path": str(Path(path).relative_to(ROOT)), "start": row,
+                          "n": int(f.shape[0]), "n_patch_total": ntot})
             row += int(f.shape[0])
             if i % 2000 == 0:
                 print(f"    {i}/{len(paths)}  {(time.time()-t0)/60:.1f} min", flush=True)

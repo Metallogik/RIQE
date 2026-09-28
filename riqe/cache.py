@@ -15,6 +15,26 @@ import numpy as np
 from .model import MVGModel, fit_mvg
 
 
+#: radice del progetto, per normalizzare i percorsi
+_ROOT = Path(__file__).resolve().parents[1]
+
+
+def canonical(path: str | Path) -> str:
+    """Percorso in forma canonica, relativa alla radice del progetto.
+
+    La cache e' stata scritta con percorsi assoluti, le tabelle del corpus
+    usano percorsi relativi.  Senza normalizzazione la ricerca fallisce in
+    silenzio e il fit si ritrova con meno slice del previsto, o con nessuna.
+    """
+    q = Path(path)
+    if q.is_absolute():
+        try:
+            q = q.relative_to(_ROOT)
+        except ValueError:
+            pass
+    return q.as_posix()
+
+
 class FeatureCache:
     def __init__(self, directory: str | Path):
         d = Path(directory)
@@ -23,7 +43,7 @@ class FeatureCache:
         self.delta: np.ndarray = np.load(d / "delta.npy", mmap_mode="r")
         self.index: list[dict] = json.loads((d / "index.json").read_text())
         self.info: dict = json.loads((d / "info.json").read_text())
-        self.by_path: dict[str, dict] = {e["path"]: e for e in self.index}
+        self.by_path: dict[str, dict] = {canonical(e["path"]): e for e in self.index}
 
     @property
     def P(self) -> int:
@@ -34,7 +54,7 @@ class FeatureCache:
         return float(self.info["C"])
 
     def slice_rows(self, path: str) -> tuple[np.ndarray, np.ndarray]:
-        e = self.by_path[path]
+        e = self.by_path[canonical(path)]
         s, n = e["start"], e["n"]
         return np.asarray(self.features[s : s + n]), np.asarray(self.delta[s : s + n])
 
@@ -47,7 +67,16 @@ class FeatureCache:
 
     def fit(self, paths, p: float | None, n_patients: int = 0, meta: dict | None = None) -> MVGModel:
         """Fit del modello sulle slice indicate, alla soglia `p`."""
-        parts = [self.select(pp, p) for pp in paths if pp in self.by_path]
+        paths = [canonical(q) for q in paths]
+        known = [q for q in paths if q in self.by_path]
+        if len(known) < len(paths):
+            raise KeyError(
+                f"{len(paths) - len(known)} delle {len(paths)} slice richieste non "
+                f"sono nella cache {self.dir.name}. Rieseguire cache_features.py, "
+                f"oppure i percorsi non corrispondono (esempio mancante: "
+                f"{next(q for q in paths if q not in self.by_path)})"
+            )
+        parts = [self.select(pp, p) for pp in known]
         parts = [x for x in parts if x.shape[0] > 0]
         if not parts:
             raise ValueError("nessuna patch selezionata: soglia p troppo alta?")
@@ -59,7 +88,7 @@ class FeatureCache:
 
     def patch_counts(self, paths, p: float | None) -> np.ndarray:
         out = []
-        for pp in paths:
+        for pp in (canonical(q) for q in paths):
             if pp not in self.by_path:
                 continue
             f, d = self.slice_rows(pp)

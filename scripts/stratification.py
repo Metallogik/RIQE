@@ -39,6 +39,15 @@ Le condizioni (a) e (b) si valutano qui; la (c) in run_battery.py.
 
 from __future__ import annotations
 
+import os
+
+# Un thread per processo: il parallelismo lo diamo con i processi, e lasciare
+# che ogni worker apra i propri thread BLAS porta a oversubscription (load 90
+# su 32 core, misurato) invece che a velocita'. Va fatto prima di numpy.
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+           "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ.setdefault(_v, "1")
+
 import argparse
 import json
 import sys
