@@ -55,7 +55,7 @@ def apply(mpl) -> None:
         "axes.labelcolor": INK_2,
         "axes.titlecolor": INK,
         "axes.titlesize": 10,
-        "axes.titleweight": "semibold",
+        "axes.titleweight": "bold",
         "axes.labelsize": 9,
         "axes.linewidth": 0.8,
         "axes.grid": True,

@@ -43,55 +43,95 @@ def save(fig, name: str) -> None:
     print(f"  scritta {name}")
 
 
+NICE = {"gaussian": "Gaussian", "wavelet": "wavelet", "tv": "TV", "nlm": "NLM",
+        "bilateral": "bilateral"}
+
+
 def fig_main_overfiltering() -> None:
-    """Figura principale: il punteggio contro la fedelta' del segnale."""
+    """Figura principale, per denoiser: quanto spesso RIQE preferisce
+    l'immagine filtrata, e quanto segnale della lesione e' rimasto.
+
+    Per denoiser e non aggregata: la media fra denoiser nasconde il
+    risultato, perche' il lisciamento lineare e' sempre penalizzato mentre
+    i filtri non lineari che preservano i bordi vengono premiati.
+    """
     f = EXP / "exp2_form2_lesions.csv"
     if not f.exists():
         print("  salto figura principale: manca exp2_form2_lesions.csv")
         return
     d = pd.read_csv(f)
-    base = d[d.denoiser == "nessuno"]
-    den = d[d.denoiser != "nessuno"]
+    dmm = 4.0
+    base = d[d.denoiser == "nessuno"][["slice_path", "diametro_mm", "riqe"]].rename(
+        columns={"riqe": "base"})
+    den = d[d.denoiser != "nessuno"].merge(base, on=["slice_path", "diametro_mm"])
+    den = den[den.diametro_mm == dmm]
+    den["preferita"] = den.riqe < den.base
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.4, 6.2), sharex=True,
-                                   gridspec_kw={"height_ratios": [1, 1.15]})
-
-    # pannello alto: punteggio per denoiser
-    for i, (name, g) in enumerate(den.groupby("denoiser")):
-        m = g.groupby("target_residual_hu")["riqe"].median()
-        ax1.plot(m.index, m.values, label=name, **fs.style_for(i))
-    b = base["riqe"].median()
-    ax1.axhline(b, color=fs.INK_MUTED, lw=1.2, ls=":", zorder=1)
-    ax1.annotate("non filtrata", xy=(den.target_residual_hu.min(), b),
-                 xytext=(2, 4), textcoords="offset points",
-                 fontsize=8, color=fs.INK_2, va="bottom")
-    ax1.set_ylabel("punteggio RIQE\n(piu' basso = piu' vicino al modello)")
-    ax1.set_title("Il punteggio premia un filtraggio che il segnale non sopravvive")
-    ax1.legend(ncol=3, loc="upper left", fontsize=7.5)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6.4, 6.4), sharex=True,
+                                   gridspec_kw={"height_ratios": [1, 1]})
+    order = ["gaussian", "wavelet", "tv", "nlm", "bilateral"]
+    for i, name in enumerate(order):
+        g = den[den.denoiser == name]
+        if g.empty:
+            continue
+        a = g.groupby("target_residual_hu")["preferita"].mean() * 100
+        b = g.groupby("target_residual_hu")["ritenzione_matched"].median()
+        st = fs.style_for(i)
+        lab = NICE.get(name, name)
+        ax1.plot(a.index, a.values, label=lab, **st)
+        ax2.plot(b.index, b.values, label=lab, **st)
+    ax1.set_ylabel("RIQE prefers the filtered\nimage over the unfiltered (%)")
+    ax1.set_ylim(-4, 104)
+    ax1.set_title("Edge-preserving denoisers are rewarded while the lesion fades",
+                  fontsize=9.5)
     fs.despine(ax1)
-
-    # pannello basso: ritenzione del segnale per dimensione di lesione
-    for i, (dmm, g) in enumerate(den.groupby("diametro_mm")):
-        m = g.groupby("target_residual_hu")["ritenzione_matched"].median()
-        c = den[den.diametro_mm == dmm]["contrasto_hu"].iloc[0]
-        ax2.plot(m.index, m.values, label=f"{dmm:.0f} mm, +{c:.0f} HU", **fs.style_for(i))
-        ax2.annotate(f"{dmm:.0f} mm", xy=(m.index[-1], m.values[-1]),
-                     xytext=(4, 0), textcoords="offset points",
-                     fontsize=8, color=fs.SERIES[i % len(fs.SERIES)], va="center")
     ax2.axhline(0.5, color=fs.INK_MUTED, lw=1.0, ls="--", zorder=1)
-    ax2.annotate("meta' del segnale perduta", xy=(den.target_residual_hu.min(), 0.5),
-                 xytext=(2, -10), textcoords="offset points", fontsize=8, color=fs.INK_2)
-    ax2.set_ylabel("ritenzione del segnale\n(filtro adattato)")
-    ax2.set_xlabel("intensita' di filtraggio (deviazione standard del residuo, HU)")
+    ax2.annotate("half of the lesion signal lost", xy=(2, 0.5), xytext=(2, -11),
+                 textcoords="offset points", fontsize=7.5, color=fs.INK_2)
+    ax2.set_ylabel(f"signal retained, {dmm:.0f} mm +10 HU lesion\n(matched filter)")
+    ax2.set_xlabel("filtering strength (residual standard deviation, HU)")
     ax2.set_ylim(0, 1.05)
     ax2.set_xscale("log")
     ax2.set_xticks(sorted(den.target_residual_hu.unique()))
     ax2.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-    ax2.legend(loc="lower left", fontsize=7.5)
+    ax2.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+    ax2.legend(loc="lower left", fontsize=7.5, ncol=2)
     fs.despine(ax2)
-
     fig.tight_layout()
-    save(fig, "fig1_sovrafiltraggio")
+    save(fig, "fig_lesions")
+
+
+def fig_tradeoff() -> None:
+    """Compromesso della ricerca: ordinamento della dose reale contro
+    sovrafiltraggio, per tutte le combinazioni (P, C, p)."""
+    f = EXP / "hparam_search.csv"
+    if not f.exists():
+        print("  salto compromesso: manca hparam_search.csv")
+        return
+    d = pd.read_csv(f).dropna(subset=["dose_corretto_min", "frac_overfilter_fail"])
+    ch = json.loads((EXP / "hparam_choice.json").read_text())
+    o = ch["original_criterion_choice"]
+    fig, ax = plt.subplots(figsize=(5.6, 4.0))
+    ax.scatter(100 * d.frac_overfilter_fail, 100 * d.dose_corretto_min, s=16,
+               color=fs.SERIES[0], alpha=0.55, edgecolors="none",
+               label="one (P, C, p) configuration")
+    for sel, lab, k in ((ch, "selected (revised criterion)", 1),
+                        (o, "selected (original criterion)", 2)):
+        r = d[(d.P == sel["P"]) & (np.isclose(d.C, sel["C"])) & (np.isclose(d.p, sel["p"]))]
+        if len(r):
+            ax.scatter(100 * r.frac_overfilter_fail, 100 * r.dose_corretto_min, s=70,
+                       color=fs.SERIES[k], marker=fs.MARKERS[k], edgecolors=fs.SURFACE,
+                       linewidths=1.5, zorder=4, label=lab)
+    ax.axhline(95, color=fs.INK_MUTED, lw=1.0, ls="--", zorder=1)
+    ax.annotate("95% threshold", xy=(ax.get_xlim()[0], 95), xytext=(4, 3),
+                textcoords="offset points", fontsize=7.5, color=fs.INK_2)
+    ax.set_xlabel("filtered full-dose images scoring better than the original (%)")
+    ax.set_ylabel("real reduced-dose images ranked worse,\nworst of chest/abdomen (%)")
+    ax.set_title("No single-model configuration is good at both", fontsize=9.5)
+    ax.legend(loc="lower right", fontsize=7.5)
+    fs.despine(ax)
+    fig.tight_layout()
+    save(fig, "fig_tradeoff")
 
 
 def fig_monotonicity() -> None:
@@ -243,6 +283,7 @@ def fig_stability() -> None:
     ax.set_xscale("log")
     ax.set_xticks(d["n_pazienti"])
     ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    ax.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
     fs.despine(ax)
     fig.tight_layout()
     save(fig, "fig6_stabilita")
@@ -250,7 +291,7 @@ def fig_stability() -> None:
 
 def main() -> int:
     print("figure:")
-    for fn in (fig_main_overfiltering, fig_monotonicity, fig_noise_optimum,
+    for fn in (fig_tradeoff, fig_main_overfiltering, fig_noise_optimum,
                fig_stratification, fig_photo_baseline, fig_stability):
         try:
             fn()
