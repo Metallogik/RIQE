@@ -48,6 +48,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from riqe import degrade as dg  # noqa: E402
 from riqe.cache import FeatureCache  # noqa: E402
 from riqe.evaluate import (  # noqa: E402
     attach_scores, holm, kendall_w, load_moments, sign_test, spearman, step_monotone,
@@ -137,6 +138,14 @@ def exp1_monotonicity(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         g = d[(d.kind == kind) & (d.source == "full")]
         if g.empty:
             continue
+        # Sul banco TEST la scala fine di rumore (forma 3) ripete alcuni
+        # livelli della scala standard con realizzazioni diverse: qui si usa
+        # solo la scala standard, mediando le realizzazioni dello stesso
+        # livello, altrimenti una slice avrebbe due punteggi per passo.
+        if param == "sigma_hu":
+            g = g[g[param].isin(dg.NOISE_SIGMAS_HU)]
+        g = g.groupby(["slice_path", param], as_index=False).agg(
+            score=("score", "mean"), cell=("cell", "first"))
         levels = sorted(g[param].unique())
         perfect = total = 0
         rhos = []

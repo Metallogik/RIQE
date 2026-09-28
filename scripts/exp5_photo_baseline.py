@@ -50,6 +50,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from riqe import degrade as dg  # noqa: E402
 from riqe.cache import FeatureCache  # noqa: E402
 from riqe.dicomio import read_hu  # noqa: E402
 from riqe.evaluate import attach_scores, load_moments, spearman, step_monotone  # noqa: E402
@@ -274,6 +275,9 @@ def verdicts(d: pd.DataFrame, col: str) -> dict:
     out = {}
     for kind, param in (("noise_white", "sigma_hu"), ("noise_fbp", "sigma_hu"), ("blur", "sigma_px")):
         g = d[(d.kind == kind) & (d.source == "full")]
+        if param == "sigma_hu":
+            g = g[g[param].isin(dg.NOISE_SIGMAS_HU)]
+        g = g.groupby(["slice_path", param], as_index=False).agg(**{col: (col, "mean")})
         perfect = total = 0
         for sp, gg in g.groupby("slice_path"):
             gg = gg.sort_values(param)
