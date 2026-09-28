@@ -97,15 +97,19 @@ def exp1_monotonicity(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             cur = g[g[param] == lv].set_index("slice_path")["score"]
             cur = np.array([cur.get(sp, np.nan) for sp in prev_idx])
             k, n, p = sign_test(cur, prev)
-            pvals[f"{prev_lab} -> {lv:g}{unit}"] = p
+            # la chiave include la scala: "originale -> 5HU" compare sia in
+            # noise_white sia in noise_fbp, e una chiave sul solo passo
+            # farebbe sovrascrivere la correzione della prima dalla seconda
+            pvals[(kind, f"{prev_lab} -> {lv:g}{unit}")] = p
             rows.append({"scala": kind, "passo": f"{prev_lab} -> {lv:g}{unit}",
                          "n_peggiorate": k, "n_validi": n,
                          "frazione_peggiorate": k / n if n else np.nan, "p_segni": p})
             prev, prev_lab = cur, f"{lv:g}{unit}"
         adj = holm(pvals)
         for r in rows:
-            if r["passo"] in adj:
-                r["p_holm"] = adj[r["passo"]]
+            key = (r["scala"], r["passo"])
+            if key in adj:
+                r["p_holm"] = adj[key]
         print(f"\n  {kind}: {perfect}/{total} immagini monotone a ogni passo "
               f"({100*perfect/max(total,1):.1f}%), Spearman mediano {np.nanmedian(rhos):+.3f}")
         for r in [x for x in rows if x["scala"] == kind]:
