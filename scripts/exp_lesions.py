@@ -220,12 +220,14 @@ def main() -> int:
     cand = corpus[(corpus["kind"] == "full") & corpus["keep"]
                   & corpus.patient_id.isin(test_pids)
                   & corpus["body_part"].eq("ABDOMEN")]
+    # una slice centrale per paziente.  Selezione esplicita invece di
+    # groupby.apply: con include_groups=False pandas toglie la colonna di
+    # raggruppamento dal risultato, e il codice a valle la cerca.
     rng = np.random.default_rng(args.seed)
-    pick = (cand.groupby("patient_id", group_keys=False)
-                .apply(lambda g: g.iloc[[len(g) // 2]], include_groups=False)
-                .reset_index())
+    idx = [g.sort_values("z").index[len(g) // 2] for _, g in cand.groupby("patient_id")]
+    pick = cand.loc[idx]
     if len(pick) > args.n_slices:
-        pick = pick.iloc[rng.choice(len(pick), args.n_slices, replace=False)]
+        pick = pick.iloc[np.sort(rng.choice(len(pick), args.n_slices, replace=False))]
     print(f"\nslice di prova: {len(pick)} (addome, split TEST, {pick.patient_id.nunique()} pazienti)")
 
     jobs = [(r.path, r.cell, noise_by_cell.get(r.cell, default_noise), args.seed + 977 * i)
