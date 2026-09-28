@@ -63,7 +63,8 @@ def main() -> int:
     # 1. presenza e integrita' delle slice -----------------------------------
     corpus = pd.read_parquet(ROOT / "corpus" / "corpus.parquet")
     have = {r.sop_uid: r.path for r in corpus.itertuples()}
-    missing = [s for s in art["corpus_slices_used"] if s["sop_uid"] not in have]
+    missing = [s for s in art["corpus_slices_used"]
+               if s["sop_uid"] not in have or not (ROOT / have[s["sop_uid"]]).exists()]
     print(f"\n1. slice presenti in locale: "
           f"{len(art['corpus_slices_used']) - len(missing)}/{len(art['corpus_slices_used'])}")
     if missing:

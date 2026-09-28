@@ -74,12 +74,20 @@ def code_hash() -> dict:
 
 
 def slice_hashes() -> dict[str, str]:
-    """SOPInstanceUID -> SHA-256, dai manifest di scaricamento."""
+    """percorso relativo della slice -> SHA-256, dai manifest di scaricamento.
+
+    L'aggancio e' per percorso, non per SOPInstanceUID: i manifest di
+    scaricamento indicizzano per nome di file dentro la serie, e il nome di
+    file non e' il SOP UID.  Chi tentasse l'aggancio diretto otterrebbe zero
+    corrispondenze, cioe' un artefatto che *dichiara* di portare gli hash
+    senza portarne nessuno.
+    """
     out = {}
-    for m in (ROOT / "data" / "manifest").glob("*.json"):
+    for m in sorted((ROOT / "data" / "manifest").glob("*.json")):
         d = json.loads(m.read_text())
+        base = f"data/dicom/{d['patient_id']}/{d['kind']}"
         for f in d["files"]:
-            out[Path(f["file"]).stem] = f["sha256"]
+            out[f"{base}/{f['file']}"] = f["sha256"]
     return out
 
 
@@ -115,13 +123,20 @@ def main() -> int:
 
     pinv = np.linalg.pinv(model.sigma, rcond=RCOND)
     sha = slice_hashes()
-    used = [
-        {**s, "sha256": sha.get(s["sop_uid"], "")}
-        for s in manifest["slices"] if s["patient_id"] in fit_pids
-    ]
+    path_of = {r.sop_uid: r.path for r in corpus.itertuples()}
+    used = []
+    for s in manifest["slices"]:
+        if s["patient_id"] not in fit_pids:
+            continue
+        pth = path_of.get(s["sop_uid"], "")
+        used.append({**s, "path": pth, "sha256": sha.get(pth, "")})
     missing = sum(1 for s in used if not s["sha256"])
     if missing:
-        print(f"ATTENZIONE: {missing} slice senza SHA-256 nel manifest di scaricamento")
+        raise SystemExit(
+            f"ERRORE: {missing} slice su {len(used)} senza SHA-256. L'artefatto "
+            f"non viene scritto: un modello che dichiara l'identita' del corpus "
+            f"senza portarla e' esattamente il difetto che questo lavoro colma."
+        )
 
     out = ROOT / args.out
     out.mkdir(parents=True, exist_ok=True)
