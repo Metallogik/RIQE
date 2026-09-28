@@ -217,7 +217,15 @@ def main() -> int:
     contrasts.append(("B: torace, GE STANDARD 1,25 vs Siemens B50f 1,5", "kernel/costruttore", ge_chest, si_chest))
     contrasts.append(("C: GE, torace 1,25 vs addome 5", "spessore+anatomia (confusi)", ge_chest, ge_abd))
     contrasts.append(("D: Siemens, torace B50f 1,5 vs addome B30f 5", "kernel+spessore+anatomia", si_chest, si_abd))
-    contrasts.append(("G: anatomia, tutti torace vs tutti addome", "anatomia (controllo negativo)",
+    # ATTENZIONE: questo NON e' un controllo negativo sull'anatomia, per
+    # quanto sia la tentazione naturale di chiamarlo cosi'.  In questa
+    # collezione il torace e' *sempre* kernel netto e strato sottile e
+    # l'addome *sempre* kernel morbido e strato spesso: il contrasto mescola
+    # anatomia, kernel e spessore in modo inseparabile.  Un controllo
+    # negativo pulito sull'anatomia **non esiste** in questi dati, e va
+    # dichiarato come limite invece di essere simulato con questo contrasto.
+    contrasts.append(("G: torace vs addome (anatomia CONFUSA con kernel e spessore)",
+                      "anatomia+kernel+spessore (NON e' un controllo negativo)",
                       sorted(set(ge_chest) | set(si_chest)), sorted(set(ge_abd) | set(si_abd))))
     contrasts.append(("H: costruttore, tutti GE vs tutti Siemens", "costruttore",
                       sorted(meta[meta.manufacturer == "GE"].index),
