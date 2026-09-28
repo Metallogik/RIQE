@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Passata unica: per ogni slice scaricata, metadati + statistiche oggettive.
+"""Single pass: for every downloaded slice, metadata + objective statistics.
 
-Produce `corpus/slices.parquet`.  I criteri di inclusione S1-S6 sono poi pure
-operazioni su questa tabella (riqe.inclusion.apply_criteria), quindi si
-possono rieseguire e cambiare di soglia senza rileggere i DICOM.
+Produces `corpus/slices.parquet`. The inclusion criteria S1-S6 are then pure
+operations on this table (riqe.inclusion.apply_criteria), so they can be
+re-run and re-thresholded without re-reading the DICOM files.
 
     .venv/bin/python scripts/build_slice_table.py [--workers 24] [--kind full]
 """
@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import os
 
-# Un thread per processo: il parallelismo lo diamo con i processi, e lasciare
-# che ogni worker apra i propri thread BLAS porta a oversubscription (load 90
-# su 32 core, misurato) invece che a velocita'. Va fatto prima di numpy.
+# One thread per process: parallelism comes from processes, and letting every
+# worker open its own BLAS threads causes oversubscription (load 90 on 32
+# cores, measured) instead of speed. Must be set before importing numpy.
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_v, "1")
@@ -56,7 +56,7 @@ def main() -> int:
 
     pat = "*" if args.kind == "both" else args.kind
     files = sorted(str(p) for p in (ROOT / "data" / "dicom").glob(f"*/{pat}/*.dcm"))
-    print(f"slice da analizzare: {len(files)}  workers={args.workers}", flush=True)
+    print(f"slices to analyse: {len(files)}  workers={args.workers}", flush=True)
 
     rows, t0 = [], time.time()
     with cf.ProcessPoolExecutor(args.workers) as ex:
@@ -69,14 +69,14 @@ def main() -> int:
     df = pd.DataFrame(rows)
     bad = df[df.get("error").notna()] if "error" in df else df.iloc[:0]
     if len(bad):
-        print(f"ATTENZIONE: {len(bad)} slice illeggibili")
+        print(f"WARNING: {len(bad)} unreadable slices")
         print(bad[["path", "error"]].head(10).to_string())
         df = df[df["error"].isna()].drop(columns=["error"])
     out = ROOT / args.out
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(out, index=False)
-    print(f"scritte {len(df)} righe in {out}  ({(time.time()-t0)/60:.1f} min)")
-    print("\nslice per cella e tipo:")
+    print(f"wrote {len(df)} rows to {out}  ({(time.time()-t0)/60:.1f} min)")
+    print("\nslices per protocol cell and dose:")
     print(df.groupby(["cell", "kind"]).size().to_string())
     return 0
 

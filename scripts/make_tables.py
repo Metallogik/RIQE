@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Tabelle LaTeX dell'articolo, generate dai file di risultato.
+"""LaTeX tables for the paper, generated from the result files.
 
-Nessun numero dell'articolo va trascritto a mano: le tabelle si rigenerano
-da experiments/ e, se un esperimento viene rifatto, l'articolo si aggiorna
-rieseguendo questo script.
+No number in the paper is transcribed by hand: the tables are regenerated
+from experiments/ into paper/tables/, and if an experiment is redone the
+paper is updated by re-running this script.
 
     .venv/bin/python scripts/make_tables.py
 """
@@ -27,11 +27,11 @@ ORDER = ["gaussian", "wavelet", "tv", "nlm", "bilateral"]
 def w(name: str, body: str) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / f"{name}.tex").write_text(body)
-    print(f"  scritta {name}.tex")
+    print(f"  wrote {name}.tex")
 
 
 def m(txt: str) -> str:
-    """Segno meno tipografico: un trattino in una tabella non e' un meno."""
+    """Typographic minus sign: a hyphen in a table is not a minus."""
     return txt.replace("-", "$-$")
 
 
@@ -40,12 +40,12 @@ def pct(x) -> str:
 
 
 def t_detection() -> None:
-    """Rilevamento delle degradazioni su TEST."""
+    """Degradation detection on TEST."""
     s = json.loads((EXP / "battery_summary.json").read_text())
-    d0 = s["esp0_dose_reale"]
+    d0 = s["exp0_real_dose"]
     rel = pd.read_csv(EXP / "exp1b_relative_noise.csv")
-    rel["peggiora"] = rel["score"] > rel["base"]
-    rt = rel.groupby(["regione", "rel_increase"])["peggiora"].mean()
+    rel["worse"] = rel["score"] > rel["base"]
+    rt = rel.groupby(["region", "rel_increase"])["worse"].mean()
     bl = pd.read_csv(EXP / "battery_scores.csv")
     orig = bl[(bl.kind == "original") & (bl.source == "full")].set_index("slice_path")["score"]
     b = bl[(bl.kind == "blur") & (bl.source == "full")].copy()
@@ -54,11 +54,11 @@ def t_detection() -> None:
     bt = b.groupby("sigma_px").apply(lambda g: (g.score > g.base).mean(), include_groups=False)
     rows = [
         r"Real reduced dose (10\%/25\% of routine) vs full dose, same slice & "
-        f"{pct(d0['corretto_torace'])} ({d0['n_torace']}) & {pct(d0['corretto_addome'])} ({d0['n_addome']}) \\\\",
+        f"{pct(d0['correct_chest'])} ({d0['n_chest']}) & {pct(d0['correct_abdomen'])} ({d0['n_abdomen']}) \\\\",
     ]
     for r in (0.05, 0.10, 0.20, 0.50, 1.00):
         rows.append(f"Added noise, +{100 * r:.0f}\\% of native & "
-                    f"{pct(rt.get(('torace', r)))} & {pct(rt.get(('addome', r)))} \\\\")
+                    f"{pct(rt.get(('chest', r)))} & {pct(rt.get(('abdomen', r)))} \\\\")
     for sp in (0.5, 1.0, 2.0):
         g = b[b.sigma_px == sp]
         ch = g[g.cell.str.contains("CHEST")]
@@ -87,7 +87,7 @@ Degradation & Chest (\%) & Abdomen (\%) \\
 def t_overfiltering() -> None:
     d = pd.read_csv(EXP / "exp2_form1_overfiltering.csv")
     d = d[d["delta"].notna()]
-    fail = d.pivot_table(index="denoiser", columns="target_residual_hu", values="fallimento",
+    fail = d.pivot_table(index="denoiser", columns="target_residual_hu", values="failure",
                          aggfunc="mean")
     med = d.pivot_table(index="denoiser", columns="target_residual_hu", values="delta",
                         aggfunc="median")
@@ -96,7 +96,7 @@ def t_overfiltering() -> None:
     for n in ORDER:
         cells = " & ".join(f"{100 * fail.loc[n, l]:.0f} \\,({m(f'{med.loc[n, l]:+.2f}')})" for l in lv)
         rows.append(f"{NICE[n]} & {cells} \\\\")
-    tot = 100 * d["fallimento"].mean()
+    tot = 100 * d["failure"].mean()
     body = (r"""\begin{table}[t]
 \centering
 \caption{Overfiltering, form 1: filtering a full-dose image cannot add information, yet
@@ -121,10 +121,10 @@ Denoiser & """ + " & ".join(f"{l:g}" for l in lv) + r""" \\
 
 def t_lesions() -> None:
     d = pd.read_csv(EXP / "exp2_form2_lesions.csv")
-    base = d[d.denoiser == "nessuno"][["slice_path", "diametro_mm", "riqe"]].rename(
+    base = d[d.denoiser == "none"][["slice_path", "diameter_mm", "riqe"]].rename(
         columns={"riqe": "base"})
-    f = d[d.denoiser != "nessuno"].merge(base, on=["slice_path", "diametro_mm"])
-    f = f[f.diametro_mm == 4.0]
+    f = d[d.denoiser != "none"].merge(base, on=["slice_path", "diameter_mm"])
+    f = f[f.diameter_mm == 4.0]
     f["pref"] = f.riqe < f.base
     lv = sorted(f.target_residual_hu.unique())
     rows = []
@@ -133,7 +133,7 @@ def t_lesions() -> None:
         cells = []
         for l in lv:
             h = g[g.target_residual_hu == l]
-            cells.append(f"{100 * h.pref.mean():.0f} / {h.ritenzione_matched.median():.2f}")
+            cells.append(f"{100 * h.pref.mean():.0f} / {h.retention_matched.median():.2f}")
         rows.append(f"{NICE[n]} & " + " & ".join(cells) + r" \\")
     ns = int(f.slice_path.nunique())
     ntot = int(d.slice_path.nunique())
@@ -168,7 +168,7 @@ def t_stratification() -> None:
         "D:": "Siemens: chest B50f 1.5\\,mm vs abdomen B30f 5\\,mm",
         "G:": "All chest vs all abdomen$^{\\dagger}$",
         "H:": "Vendor: all GE vs all Siemens",
-        "ANCORA": "\\textit{Anchor: full vs real reduced dose, same patients}",
+        "ANCHOR": "\\textit{Anchor: full vs real reduced dose, same patients}",
     }
 
     def L(c):
@@ -179,8 +179,8 @@ def t_stratification() -> None:
         vend = {"GE": "GE", "SIEMENS": "Siemens"}.get(cell[0], cell[0])
         return f"Pixel-spacing tertiles, {vend} {cell[1].lower()}"
 
-    d = pd.concat([d[d.asse == "dose"], d[d.asse != "dose"].sort_values("eta")])
-    rows = [f"{L(r.contrasto)} & {r.n_A} / {r.n_B} & {r.D_oss:.2f} & {r.nullo_mediana:.2f} & "
+    d = pd.concat([d[d.axis == "dose"], d[d.axis != "dose"].sort_values("eta")])
+    rows = [f"{L(r.contrast)} & {r.n_A} / {r.n_B} & {r.D_obs:.2f} & {r.null_median:.2f} & "
             f"{r.eta:.2f} \\\\" for r in d.itertuples()]
     body = (r"""\begin{table}[t]
 \centering
@@ -209,10 +209,10 @@ def t_baselines() -> None:
     s5 = json.loads((EXP / "exp5_summary.json").read_text())
     dr = json.loads((EXP / "exp5_dose_and_relnoise.json").read_text())
     s6 = json.loads((EXP / "exp6_ldctiqac_summary.json").read_text())
-    v = pd.read_csv(EXP / "exp5_verdicts.csv").set_index("modello")
+    v = pd.read_csv(EXP / "exp5_verdicts.csv").set_index("model")
     r6 = s6["windows"]["W350/L40"]
-    a, b = dr["RIQE (TC)"], dr["fotografico"]
-    va, vb = v.loc["RIQE (TC, maschere)"], v.loc["fotografico PD/CC0"]
+    a, b = dr["RIQE (CT)"], dr["photographic"]
+    va, vb = v.loc["RIQE (CT, masks)"], v.loc["photographic PD/CC0"]
 
     def ci(x):
         return m(f"{x['spearman']:+.2f} [{x['spearman_ci95'][0]:+.2f}, {x['spearman_ci95'][1]:+.2f}]")
@@ -229,12 +229,12 @@ correlation with the mean score of five radiologists on the 1000 LDCTIQAC 2023 i
 \toprule
 & RIQE (CT) & Photographic \\
 \midrule
-Real reduced dose ranked worse, chest (\%) & """ + f"{a['dose torace']:.1f} & {b['dose torace']:.1f}" + r""" \\
-Real reduced dose ranked worse, abdomen (\%) & """ + f"{a['dose addome']:.1f} & {b['dose addome']:.1f}" + r""" \\
-Added noise +20\% of native detected (\%) & """ + f"{a['rumore +20%']:.1f} & {b['rumore +20%']:.1f}" + r""" \\
-Added noise +100\% of native detected (\%) & """ + f"{a['rumore +100%']:.1f} & {b['rumore +100%']:.1f}" + r""" \\
-Filtered full-dose scoring better (\%) & """ + f"{100 * va.frazione_fallimenti_sovrafiltraggio:.1f} & {100 * vb.frazione_fallimenti_sovrafiltraggio:.1f}" + r""" \\
-Spearman with radiologists [95\% CI] & """ + f"{ci(r6['RIQE'])} & {ci(r6['fotografico'])}" + r""" \\
+Real reduced dose ranked worse, chest (\%) & """ + f"{a['dose_chest']:.1f} & {b['dose_chest']:.1f}" + r""" \\
+Real reduced dose ranked worse, abdomen (\%) & """ + f"{a['dose_abdomen']:.1f} & {b['dose_abdomen']:.1f}" + r""" \\
+Added noise +20\% of native detected (\%) & """ + f"{a['noise_+20%']:.1f} & {b['noise_+20%']:.1f}" + r""" \\
+Added noise +100\% of native detected (\%) & """ + f"{a['noise_+100%']:.1f} & {b['noise_+100%']:.1f}" + r""" \\
+Filtered full-dose scoring better (\%) & """ + f"{100 * va.overfilter_failure_fraction:.1f} & {100 * vb.overfilter_failure_fraction:.1f}" + r""" \\
+Spearman with radiologists [95\% CI] & """ + f"{ci(r6['RIQE'])} & {ci(r6['photographic'])}" + r""" \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -243,7 +243,7 @@ Spearman with radiologists [95\% CI] & """ + f"{ci(r6['RIQE'])} & {ci(r6['fotogr
 
 
 def main() -> int:
-    print("tabelle:")
+    print("tables:")
     for fn in (t_detection, t_overfiltering, t_lesions, t_stratification, t_baselines):
         fn()
     return 0

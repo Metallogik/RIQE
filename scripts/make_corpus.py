@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Applica i criteri di inclusione, definisce la partizione e scrive il
-manifest del corpus.
+"""Apply the inclusion criteria, define the split and write the corpus
+manifest.
 
-Ingresso : corpus/slices.parquet (da build_slice_table.py)
-Uscita   : corpus/corpus.parquet        tabella completa con esiti S1-S6
-           corpus/split.json           partizione per paziente, congelata
-           corpus/exclusion_report.csv conteggi per criterio
-           corpus/corpus_manifest.json identita' del corpus per l'artefatto
+Input  : corpus/slices.parquet (from build_slice_table.py)
+Output : corpus/corpus.parquet        full table with S1-S6 outcomes
+         corpus/split.json            patient-level split, frozen
+         corpus/exclusion_report.csv  counts per criterion
+         corpus/corpus_manifest.json  identity of the corpus for the artefact
 
-La partizione e' **per paziente**, mai per slice: le slice di uno stesso
-paziente sono fortemente correlate, e partizionarle gonfierebbe ogni stima
-di stabilita'.  Stratificata per cella di protocollo.
+The split is **by patient**, never by slice: slices of one patient are
+strongly correlated, and splitting them would inflate every stability
+estimate. It is stratified by protocol cell.
 
     .venv/bin/python scripts/make_corpus.py [--test-frac 0.2] [--seed 20260917]
 """
@@ -44,7 +44,7 @@ def git_commit() -> str:
 
 
 def code_hash() -> str:
-    """Hash del sorgente che determina i numeri: identita' del codice."""
+    """Hash of the source that determines the numbers: identity of the code."""
     h = hashlib.sha256()
     for f in sorted((ROOT / "riqe").glob("*.py")):
         h.update(f.name.encode())
@@ -53,7 +53,7 @@ def code_hash() -> str:
 
 
 def stratified_patient_split(df: pd.DataFrame, test_frac: float, seed: int):
-    """Partizione per paziente, stratificata per cella di protocollo."""
+    """Patient-level split, stratified by protocol cell."""
     rng = np.random.default_rng(seed)
     per_patient = df.groupby("patient_id")["cell"].agg(lambda s: s.mode().iloc[0])
     fit, test = [], []
@@ -73,30 +73,30 @@ def main() -> int:
     args = ap.parse_args()
 
     df = pd.read_parquet(ROOT / "corpus" / "slices.parquet")
-    print(f"slice lette: {len(df)}  pazienti: {df.patient_id.nunique()}")
+    print(f"slices read: {len(df)}  patients: {df.patient_id.nunique()}")
 
     full = df[df["kind"] == "full"].copy()
     low = df[df["kind"] == "low"].copy()
-    print(f"  dose piena: {len(full)} slice, {full.patient_id.nunique()} pazienti")
-    print(f"  dose ridotta: {len(low)} slice, {low.patient_id.nunique()} pazienti")
+    print(f"  full dose: {len(full)} slices, {full.patient_id.nunique()} patients")
+    print(f"  reduced dose: {len(low)} slices, {low.patient_id.nunique()} patients")
 
-    # I criteri si applicano al corpus pristine (dose piena).  Le slice a
-    # dose ridotta passano gli stessi criteri geometrici ma non sono
-    # pristine: servono come test e come ancora positiva di divergenza.
+    # The criteria define the pristine (full-dose) corpus. Reduced-dose slices
+    # go through the same geometric criteria but are not pristine: they serve
+    # as test images and as the upper anchor of model divergence.
     full_c = inclusion.apply_criteria(full)
     low_c = inclusion.apply_criteria(low)
 
     rep = inclusion.exclusion_report(full_c)
-    print("\nesclusioni sul corpus a dose piena (a cascata):")
+    print("\nexclusions on the full-dose corpus (in cascade):")
     print(rep.to_string(index=False))
     rep.to_csv(ROOT / "corpus" / "exclusion_report.csv", index=False)
 
     kept = full_c[full_c["keep"]]
-    print(f"\ntrattenute: {len(kept)} slice da {kept.patient_id.nunique()} pazienti")
-    print(kept.groupby("cell").agg(slice=("sop_uid", "size"), pazienti=("patient_id", "nunique")).to_string())
+    print(f"\nkept: {len(kept)} slices from {kept.patient_id.nunique()} patients")
+    print(kept.groupby("cell").agg(slices=("sop_uid", "size"), patients=("patient_id", "nunique")).to_string())
 
     fit_ids, test_ids = stratified_patient_split(kept, args.test_frac, args.seed)
-    # split interno di FIT per la ricerca degli iperparametri
+    # inner split of FIT for the hyperparameter search
     inner = kept[kept.patient_id.isin(fit_ids)]
     fit_inner, val_inner = stratified_patient_split(inner, 0.25, args.seed + 1)
 
@@ -110,8 +110,8 @@ def main() -> int:
         "val_inner": val_inner,
     }
     (ROOT / "corpus" / "split.json").write_text(json.dumps(split, indent=1))
-    print(f"\npartizione: FIT {len(fit_ids)} pazienti (interno {len(fit_inner)}/"
-          f"{len(val_inner)}), TEST {len(test_ids)} pazienti")
+    print(f"\nsplit: FIT {len(fit_ids)} patients (inner {len(fit_inner)}/"
+          f"{len(val_inner)}), TEST {len(test_ids)} patients")
 
     out = pd.concat([full_c, low_c], ignore_index=True)
     out["split"] = np.where(
@@ -128,7 +128,7 @@ def main() -> int:
         "license_uri": "https://creativecommons.org/licenses/by/4.0/",
         "subsets_used": ["Chest", "Liver/Abdomen"],
         "subsets_excluded": {
-            "Head": "NIH Controlled Data Access; non esposto dall'API pubblica NBIA"
+            "Head": "NIH Controlled Data Access; not exposed by the public NBIA API"
         },
         "required_citation": (
             "McCollough, C., Chen, B., Holmes III, D., Duan, X., Yu, Z., Yu, L., "
@@ -144,6 +144,7 @@ def main() -> int:
             "S3_max_on_ring": inclusion.S3_MAX_ON_RING,
             "S4_metal_hu": inclusion.S4_METAL_HU,
             "S4_max_frac": inclusion.S4_MAX_FRAC,
+            "S5_enabled": inclusion.S5_ENABLED,
             "S5_max_robust_z": inclusion.S5_MAX_Z,
             "S6_per_patient": inclusion.S6_PER_PATIENT,
         },
@@ -166,7 +167,7 @@ def main() -> int:
         ],
     }
     (ROOT / "corpus" / "corpus_manifest.json").write_text(json.dumps(manifest, indent=1))
-    print("scritti corpus.parquet, split.json, corpus_manifest.json, exclusion_report.csv")
+    print("wrote corpus.parquet, split.json, corpus_manifest.json, exclusion_report.csv")
     return 0
 
 

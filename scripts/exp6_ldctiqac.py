@@ -1,30 +1,34 @@
 #!/usr/bin/env python3
-"""Esperimento 6 - accordo con i giudizi dei radiologi (LDCTIQAC 2023).
+"""Experiment 6 - agreement with radiologists' ratings (LDCTIQAC 2023).
 
-Dati: LDCTIQAC 2023 training set (Zenodo 10.5281/zenodo.7833096, CC BY 4.0),
-1000 immagini TC addominali a bassa dose, ciascuna con il punteggio medio di
-cinque radiologi su scala 0 (peggiore) - 4 (migliore).
+Data: LDCTIQAC 2023 training set (Zenodo 10.5281/zenodo.7833096, CC BY 4.0),
+1000 low-dose abdominal CT images, each with the mean score of five
+radiologists on a scale from 0 (worst) to 4 (best).
 
-ANALISI ESPLORATIVA, con tre adattamenti dichiarati:
+Download the training archive from the Zenodo record and unpack it into
+data/ldctiqac/, so that data/ldctiqac/LDCTIQAG2023_train/train.json and
+data/ldctiqac/LDCTIQAG2023_train/image/ exist.
 
-1. Le immagini sono distribuite normalizzate a [0, 1] con una finestra di
-   tessuti molli, non in HU, e la finestra non e' dichiarata in modo univoco
-   (W350/L40 sulla pagina della challenge, W400/L50 in un lavoro successivo).
-   Le si riporta in HU con entrambe e si confrontano i risultati.  Con C
-   piccolo i coefficienti MSCN sono quasi invarianti a una trasformazione
-   affine dell'intensita', quindi l'effetto atteso della finestra e' piccolo:
-   lo si misura invece di assumerlo.
-2. Fuori dalla finestra le immagini sono saturate (0 o 1): aria, polmone e
-   osso sono piatti.  Il dominio ammesso per le patch diventa l'insieme dei
-   pixel non saturi, con lo stesso requisito al 100% del FOV nella
-   specifica del modello.
-3. Sorgente parzialmente comune: le immagini Mayo di LDCTIQAC vengono dallo
-   stesso archivio della nostra collezione.  L'unico paziente identificabile
-   in comune (L143) e' nel nostro split TEST, mai usato per il fit.
+EXPLORATORY ANALYSIS, with three declared adaptations:
 
-Cosa misura e cosa no: accordo con la qualita' **percepita** da radiologi,
-non con la performance diagnostica.  I metodi della challenge sono addestrati
-su questi punteggi; RIQE no, quindi il confronto con loro non e' alla pari.
+1. The images are distributed normalised to [0, 1] with a soft-tissue window,
+   not in HU, and the window is not stated unambiguously (W350/L40 on the
+   challenge page, W400/L50 in a later paper). They are mapped back to HU
+   with both, and the results compared. With small C the MSCN coefficients
+   are nearly invariant to an affine intensity transform, so the expected
+   effect of the window is small: it is measured rather than assumed.
+2. Outside the window the images are saturated (0 or 1): air, lung and bone
+   are flat. The admissible patch domain becomes the set of unsaturated
+   pixels, with the same 100% requirement as the FOV in the model
+   specification.
+3. Partly shared source: the Mayo images in LDCTIQAC come from the same
+   archive as our collection. The only identifiable shared patient (L143) is
+   in our TEST split, never used for fitting.
+
+What it measures and what it does not: agreement with the quality
+**perceived** by radiologists, not with diagnostic performance. The challenge
+methods are trained on these scores; RIQE is not, so a comparison with them
+is not like for like.
 
     .venv/bin/python scripts/exp6_ldctiqac.py
 """
@@ -58,9 +62,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data" / "ldctiqac" / "LDCTIQAG2023_train"
 OUT = ROOT / "experiments"
 
-#: finestre candidate (larghezza, livello) in HU
+#: candidate windows (width, level) in HU
 WINDOWS = {"W350/L40": (350.0, 40.0), "W400/L50": (400.0, 50.0)}
-#: tolleranza per considerare un pixel saturo
+#: tolerance for considering a pixel saturated
 SAT_EPS = 1e-6
 
 _G: dict = {}
@@ -102,8 +106,8 @@ def main() -> int:
     scores = json.loads((DATA / "train.json").read_text())
     names = sorted(scores)
     y = np.array([scores[n] for n in names], dtype=float)
-    print(f"LDCTIQAC: {len(names)} immagini, punteggi radiologici {y.min():g}-{y.max():g}")
-    print(f"modello: P={P} C={C:g} p={p:g}")
+    print(f"LDCTIQAC: {len(names)} images, radiologist scores {y.min():g}-{y.max():g}")
+    print(f"model: P={P} C={C:g} p={p:g}")
 
     corpus = pd.read_parquet(ROOT / "corpus" / "corpus.parquet")
     split = json.load(open(ROOT / "corpus" / "split.json"))
@@ -114,7 +118,7 @@ def main() -> int:
     photo_f = OUT / "exp5_photo_model.npz"
     if photo_f.exists():
         z = np.load(photo_f)
-        models["fotografico"] = MVGModel(nu=z["nu"], sigma=z["sigma"], n_patches=0,
+        models["photographic"] = MVGModel(nu=z["nu"], sigma=z["sigma"], n_patches=0,
                                          n_images=0, n_patients=0)
 
     rows, summary = [], {"P": P, "C": C, "p": p, "n_images": len(names), "windows": {}}
@@ -133,8 +137,8 @@ def main() -> int:
             summary["windows"][wname][mname] = {
                 "n_scored": int(ok.sum()), "spearman": float(rho), "spearman_ci95": [lo, hi],
                 "pearson": float(r_p)}
-            print(f"  {wname:9s} {mname:12s}: {ok.sum():4d} punteggiabili  "
-                  f"Spearman {rho:+.3f} [IC95 {lo:+.3f}, {hi:+.3f}]  Pearson {r_p:+.3f}")
+            print(f"  {wname:9s} {mname:12s}: {ok.sum():4d} scoreable  "
+                  f"Spearman {rho:+.3f} [95% CI {lo:+.3f}, {hi:+.3f}]  Pearson {r_p:+.3f}")
             for (n, *_rest), sc in zip(res, s):
                 rows.append({"image": n, "window": wname, "model": mname, "score": sc,
                              "radiologist": scores[n]})
@@ -143,9 +147,9 @@ def main() -> int:
 
     pd.DataFrame(rows).to_csv(OUT / "exp6_ldctiqac_scores.csv", index=False)
     (OUT / "exp6_ldctiqac_summary.json").write_text(json.dumps(summary, indent=1))
-    print("\nsegno atteso: negativo (RIQE piu' basso = piu' vicino al modello; "
-          "punteggio radiologico piu' alto = migliore)")
-    print(f"scritti {OUT}/exp6_ldctiqac_{{scores.csv,summary.json}}")
+    print("\nexpected sign: negative (lower RIQE = closer to the model; "
+          "higher radiologist score = better)")
+    print(f"wrote {OUT}/exp6_ldctiqac_{{scores.csv,summary.json}}")
     return 0
 
 

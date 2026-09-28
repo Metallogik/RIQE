@@ -1,14 +1,14 @@
 {
  "model_id": "riqe-v1.0",
  "created": "2026-09-28",
- "description": "Modello di riferimento no-reference in stile NIQE, fittato su TC a dose piena. Il punteggio e' una distanza rispetto a questo modello, non un giudizio assoluto di qualita' diagnostica: il modello non sa cosa sia una lesione, e i valori non sono confrontabili con valori NIQE della letteratura.",
+ "description": "NIQE-style no-reference reference model, fitted on full-dose CT. The score is a distance from this model, not an absolute judgement of diagnostic quality: the model does not know what a lesion is, and its values are not comparable with NIQE values in the literature.",
  "license": {
   "model": "CC BY 4.0",
   "code": "MIT",
   "holder": "Metallogik",
   "inherited_attribution": "McCollough, C., Chen, B., Holmes III, D., Duan, X., Yu, Z., Yu, L., Leng, S., Fletcher, J. (2020). Low Dose CT Image and Projection Data (LDCT-and-Projection-data) (Version 7) [dataset]. The Cancer Imaging Archive. https://doi.org/10.7937/9npb-2637",
   "inherited_acknowledgement": "NIBIB grants EB017095 and EB017185 (PI: Cynthia McCollough)",
-  "algorithm_source": "Mittal A., Soundararajan R., Bovik A.C., Making a 'Completely Blind' Image Quality Analyzer, IEEE SPL 20(3):209-212, 2013. Implementato dall'articolo; nessun codice di terzi incorporato."
+  "algorithm_source": "Mittal A., Soundararajan R., Bovik A.C., Making a 'Completely Blind' Image Quality Analyzer, IEEE SPL 20(3):209-212, 2013. Implemented from the paper; no third-party code incorporated."
  },
  "dimensions": 36,
  "feature_names": [
@@ -51,9 +51,9 @@
  ],
  "arrays": {
   "file": "riqe-v1.0.npz",
-  "nu": "vettore medio (36,)",
-  "sigma": "covarianza (36, 36)",
-  "pinv_sigma": "pseudo-inversa di Sigma, rcond=1e-10",
+  "nu": "mean vector (36,)",
+  "sigma": "covariance (36, 36)",
+  "pinv_sigma": "pseudo-inverse of Sigma, rcond=1e-10",
   "sha256": "b1a4ffdf8288c7c6667fd3b0ca674756c69e5f1c85e9b5a53d596bf19b32f595"
  },
  "intensity_mapping": {
@@ -70,27 +70,27 @@
   "fov_required_fraction": 1.0,
   "use_masks": true,
   "quantize": false,
-  "formula": "L = 255 * (clip(HU, -1000, 1000) + 1000) / 2000, float32 non arrotondato",
-  "note": "La mappatura fa parte della specifica del modello: finestre diverse producono modelli fra loro incompatibili."
+  "formula": "L = 255 * (clip(HU, -1000, 1000) + 1000) / 2000, float32, not rounded",
+  "note": "The mapping is part of the model specification: different windows produce mutually incompatible models."
  },
  "masking": {
   "fov_required_fraction": 1.0,
-  "fov_rule": "pixel > PixelPaddingValue, e >= -1024 HU quando il tag manca",
+  "fov_rule": "pixel > PixelPaddingValue, and >= -1024 HU when the tag is missing",
   "body_min_fraction_per_patch": 0.9,
-  "body_rule": "HU > -300, apertura 5x5, componente connessa maggiore, riempimento buchi",
-  "why": "Le immagini GE di questa collezione portano 55.772 pixel per slice (21,3%) a -3024 HU di riempimento fuori campo, le Siemens no. Senza maschera FOV la differenza fra costruttori che si misurerebbe e' una convenzione DICOM, non la fisica dell'acquisizione."
+  "body_rule": "HU > -300, 5x5 opening, largest connected component, holes filled",
+  "why": "GE images in this collection carry 55,772 pixels per slice (21.3%) of -3024 HU padding outside the field of view; Siemens images do not. Without a FOV mask the vendor difference one would measure is a DICOM convention, not the physics of the acquisition."
  },
  "estimator": {
-  "gaussian_window": "7x7, sigma 1.0, volume unitario",
-  "ggd": "momenti (Sharifi & Leon-Garcia 1995)",
-  "aggd": "momenti (Lasmar, Stitou, Berthoumieu 2009)",
+  "gaussian_window": "7x7, sigma 1.0, unit volume",
+  "ggd": "moments (Sharifi & Leon-Garcia 1995)",
+  "aggd": "moments (Lasmar, Stitou, Berthoumieu 2009)",
   "alpha_inversion_grid": {
    "min": 0.05,
    "max": 20.0,
    "n": 40001
   },
   "scales": 2,
-  "second_scale": "stesso kernel gaussiano, decimazione 2:1, patch P/2",
+  "second_scale": "same Gaussian kernel, 2:1 decimation, patch P/2",
   "score_formula": "sqrt((nu1-nu2)^T ((S1+S2)/2)^-1 (nu1-nu2)), pinv rcond=1e-10"
  },
  "hyperparameters": {
@@ -103,10 +103,10 @@
    "P": 24.0,
    "C": 0.01,
    "p": 0.5,
-   "dose_corretto_min": 0.9583333333333334,
-   "dose_corretto_torace": 1.0,
-   "dose_corretto_addome": 0.9583333333333334,
-   "rumore_rel_rilevato": 0.9878345498783455,
+   "dose_correct_min": 0.9583333333333334,
+   "dose_correct_chest": 1.0,
+   "dose_correct_abdomen": 0.9583333333333334,
+   "rel_noise_detected": 0.9878345498783455,
    "frac_overfilter_fail": 0.43625,
    "mono_min": 0.275,
    "d_boot_median": 0.1649549416910683,
@@ -121,7 +121,7 @@
   "n_patients": 158,
   "patches_per_slice": 31.96545358649789,
   "cond_sigma": 701823.5951826564,
-  "split": "FIT (la partizione TEST non e' stata usata per il fitting)"
+  "split": "FIT (the TEST partition was not used for fitting)"
  },
  "corpus": {
   "collection": "LDCT-and-Projection-data",
@@ -134,7 +134,7 @@
    "Liver/Abdomen"
   ],
   "subsets_excluded": {
-   "Head": "NIH Controlled Data Access; non esposto dall'API pubblica NBIA"
+   "Head": "NIH Controlled Data Access; not exposed by the public NBIA API"
   },
   "inclusion_thresholds": {
    "S1_trim": 0.1,
@@ -146,44 +146,45 @@
    "S3_max_on_ring": 0.02,
    "S4_metal_hu": 2000.0,
    "S4_max_frac": 0.0001,
+   "S5_enabled": false,
    "S5_max_robust_z": 4.0,
    "S6_per_patient": 24
   },
   "exclusion_report": [
    {
-    "criterio": "S1_interior",
-    "esclusi": 9572,
-    "residui": 37544
+    "criterion": "S1_interior",
+    "excluded": 9572,
+    "remaining": 37544
    },
    {
-    "criterio": "S2_anatomy",
-    "esclusi": 1870,
-    "residui": 35674
+    "criterion": "S2_anatomy",
+    "excluded": 1870,
+    "remaining": 35674
    },
    {
-    "criterio": "S3_untruncated",
-    "esclusi": 0,
-    "residui": 35674
+    "criterion": "S3_untruncated",
+    "excluded": 0,
+    "remaining": 35674
    },
    {
-    "criterio": "S4_no_metal",
-    "esclusi": 736,
-    "residui": 34938
+    "criterion": "S4_no_metal",
+    "excluded": 736,
+    "remaining": 34938
    },
    {
-    "criterio": "S5_no_streak",
-    "esclusi": 0,
-    "residui": 34938
+    "criterion": "S5_no_streak",
+    "excluded": 0,
+    "remaining": 34938
    },
    {
-    "criterio": "S6_sampled",
-    "esclusi": 30186,
-    "residui": 4752
+    "criterion": "S6_sampled",
+    "excluded": 30186,
+    "remaining": 4752
    },
    {
-    "criterio": "TOTALE trattenute",
-    "esclusi": 42364,
-    "residui": 4752
+    "criterion": "TOTAL kept",
+    "excluded": 42364,
+    "remaining": 4752
    }
   ],
   "cells": {
@@ -38486,29 +38487,29 @@
   }
  ],
  "code": {
-  "package_sha256": "312f875ab1bd391054084a6c826f4327b0a7aa087dee59d653f2082cc6fc5d6b",
+  "package_sha256": "2dc9bea003d577e7995b47f432945ce94b679e2a5f5f742dc7ac94b816d402ab",
   "files": {
-   "__init__.py": "ae87c3616e30b3f9ce63037f4e8653352d7a6e64aae889ecba1e3ff2d92f7bdb",
-   "bank.py": "99a64ed2b7ce8aebdc3490686f150abc4ffef4c0b3604d89ddab8f90d866b846",
-   "cache.py": "3b202a76539eea04c3ab17c845d80810a2bd08bbc9d9caf5aba41ceba245f8b4",
-   "degrade.py": "1a3d7b8e11f4628cc9910fc9d5bf58cc920206fc130d6825ada025e3db0d21da",
-   "dicomio.py": "c96c619f179986929f45a6271ce69244a2aef7b57aa3b5c493cdef93b05b4147",
-   "dosetest.py": "9e3c5b3b520466f68a404796e929d8225905b24aacb0cfd631ecadd28d921509",
-   "evaluate.py": "be35cdab61230268d526a26cd607c5358794aa87c8994c4b3fbea1882a694a09",
-   "extract.py": "79e409b3f330c58f6e3fe09c1b6d6540dedd24cd764d287a4367d85da3813127",
-   "figstyle.py": "c52f151636110c216880d80a1df25add9812df0529efd5e4b2e5dcc676066b9a",
-   "hu.py": "e7272f52042315fe744498844f8dac56b9a34160892b470da67081fc5c4fc4cc",
-   "inclusion.py": "1477a0f5b21c6c38f0b15188db4d4062ea329f63b37a423336a495def0757df9",
-   "model.py": "9799405319cd618c7cb640b410d86c6c7a697a7ca7ad545718be97f94f589f3a",
-   "nss.py": "9a7e540317d125c1eea7cc49e961aa740edac5b8c2a74d741338ac7f3cb8a172",
-   "tcia.py": "5c48d98f62d26929ebb70c0f5df1853b3126abfda5d4619b2c2c7349a2471232"
+   "__init__.py": "cda4dbab1acc4ec811eaa0fd046d66210091b94b1f8d515d7461ae32de8ed933",
+   "bank.py": "3c1a8dd5079321630b908e0e3cc695bb01658b4a37955604715bb6a348033f72",
+   "cache.py": "60584b79ac97a9acc691c056bfd77bfc3ca1514c9969dd1eb6954fa4102c4cc8",
+   "degrade.py": "9d9461d9a77744940eeb79d301f9016223a043c410658e493946c0cc0c5855b0",
+   "dicomio.py": "9e26b78118872398e9d0f3d8d4226c0c7e7dd122909d039a085c389aeae8ed1f",
+   "dosetest.py": "948674930400da0c72584dbbe813907ed9f511bf2647e6cad25f1dcecbf7ce4a",
+   "evaluate.py": "f27b29b3284fc6c5bb3c0e19bf451a6758eb3b88821189d70e6dd1184792d176",
+   "extract.py": "05c889a5d7f65b634a8a85db59e6acc59b9b85797d9ba6579a3f4844231fb4ac",
+   "figstyle.py": "7173ee8bcb30f2f075aae07d166ca85ce964b0842083bea68c9189d518395270",
+   "hu.py": "ba1ff78f31d4afbdff6cdc08fac2d0c56d47ddc2043d92aae5e20d7a0caf6706",
+   "inclusion.py": "51d8daa2a38b8685b583424e35203937ffd5aa122b80e708e8ca3a286296ebae",
+   "model.py": "e1312f9093b7830f38e96d36ac744111585e5e13da1f0177e47a81cd9b1dccec",
+   "nss.py": "4ea83a96ad3b09a61a3f4ca1f642723776e9bb6afa8673b21290ed1eb41e1d31",
+   "tcia.py": "4d2e03aa059454ba74a1ce1d8cb21eac9070500c46e9e7e04e7ad164fe0050ca"
   },
-  "git_commit": "015f8237e12940c201ab8bf6b2c5f6428672e5af-dirty",
+  "git_commit": "8ec086263fdfa0aa64738476d361686cb242bfbc-dirty",
   "python": "3.12.3",
   "numpy": "2.5.3",
   "scipy": "1.18.1",
   "pydicom": "3.0.2",
   "package": "riqe"
  },
- "reproduce": "scripts/download_corpus.py -> scripts/build_slice_table.py -> scripts/make_corpus.py -> scripts/cache_features.py -> scripts/fit_model.py ; poi scripts/verify_model.py per il confronto"
+ "reproduce": "scripts/download_corpus.py -> scripts/build_slice_table.py -> scripts/make_corpus.py -> scripts/cache_features.py -> scripts/fit_model.py ; then scripts/verify_model.py for the comparison"
 }

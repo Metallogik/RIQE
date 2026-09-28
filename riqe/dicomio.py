@@ -1,5 +1,5 @@
-"""Lettura DICOM -> unita' Hounsfield, con i metadati che servono agli assi
-di stratificazione.
+"""DICOM reading -> Hounsfield units, with the metadata needed by the
+stratification axes.
 """
 
 from __future__ import annotations
@@ -11,17 +11,17 @@ import pydicom
 
 
 def read_hu(path: str | Path, with_pixels: bool = True):
-    """Legge una slice.  Ritorna (hu, padding_value, meta).
+    """Read one slice. Returns (hu, padding_value, meta).
 
-    `hu` e' float32 in unita' Hounsfield.  `padding_value` e' il valore di
-    riempimento fuori campo dichiarato dal costruttore, o None.
+    `hu` is float32 in Hounsfield units. `padding_value` is the out-of-field
+    padding value declared by the vendor, or None.
     """
     d = pydicom.dcmread(str(path), stop_before_pixels=not with_pixels)
     pad = getattr(d, "PixelPaddingValue", None)
     slope = float(getattr(d, "RescaleSlope", 1.0))
     inter = float(getattr(d, "RescaleIntercept", 0.0))
     if pad is not None:
-        # PixelPaddingValue e' in valori memorizzati, non in HU
+        # PixelPaddingValue is in stored values, not in HU
         pad = float(pad) * slope + inter
 
     kern = getattr(d, "ConvolutionKernel", None)
@@ -59,7 +59,7 @@ def read_hu(path: str | Path, with_pixels: bool = True):
 
 
 def cell_of(meta: dict) -> str:
-    """Cella di protocollo: costruttore | regione | kernel | spessore."""
+    """Protocol cell: vendor | region | kernel | slice thickness."""
     return (
         f"{meta['manufacturer']}|{meta['body_part']}|{meta['kernel']}|"
         f"{meta['slice_thickness']:g}"

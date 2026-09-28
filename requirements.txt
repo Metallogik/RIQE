@@ -1,0 +1,11 @@
+# Versions used to produce riqe-v1.0 (Python 3.12). All permissive licences
+# (BSD, MIT, Apache 2.0, PSF-style, HPND). No GPL dependency, no pyiqa.
+numpy==2.5.3
+scipy==1.18.1
+pydicom==3.0.2
+scikit-image==0.26.0
+PyWavelets==1.10.0
+pandas==3.0.6
+pyarrow==25.0.1
+matplotlib==3.11.2
+pillow==12.3.0

@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
-"""Esperimento 2, forma 2 - il risultato principale.
+"""Experiment 2, form 2 - the main result.
 
-Confronta, sulla stessa scala di intensita' di filtraggio:
+Compares, on the same filter-strength scale:
 
-  * il punteggio RIQE,
-  * la fedelta' del segnale di lesioni a basso contrasto inserite
-    (ritenzione del filtro adattato e ritenzione di picco),
-  * il d' del filtro adattato NPW.
+  * the RIQE score,
+  * the signal fidelity of inserted low-contrast lesions (matched-filter
+    retention and peak retention),
+  * the d' of the NPW matched filter.
 
-La domanda: **RIQE continua a migliorare nella regione in cui la fedelta' del
-segnale e' gia' crollata?**  Se si', la metrica premia un filtraggio che ha
-gia' cancellato lesioni a basso contrasto, e va detto a chiare lettere.
+The question: **does RIQE keep improving in the region where signal fidelity
+has already collapsed?** If so, the metric rewards filtering that has already
+erased low-contrast lesions, and this must be stated plainly.
 
-Perche' tre misure e non una.  Il d' del filtro adattato con template e
-posizione noti e' quasi insensibile al lisciamento -- proprieta' nota
-dell'osservatore quasi ottimale, verificata qui -- e usato da solo
-suggerirebbe che il sovrafiltraggio non fa danno.  La perdita di ampiezza del
-segnale e' cio' che cancella una lesione all'occhio.  Le due divergono, e la
-divergenza e' informazione, non rumore: va riportata.
+Why three measures and not one. The d' of the matched filter with known
+template and location is almost insensitive to smoothing -- a known property
+of the near-optimal observer, verified here -- and used alone it would
+suggest that overfiltering does no harm. Loss of signal amplitude is what
+erases a lesion to the eye. The two diverge, and the divergence is
+information, not noise: it is reported.
 
-Sostrato: slice a dose piena (trattate come verita' a basso rumore), piu' una
-realizzazione di rumore tipo FBP al livello misurato sul contrasto reale
-dose piena / dose ridotta della stessa cella di protocollo.  La varianza del
-d' e' presa **sulle realizzazioni di rumore allo stesso sito**, cosi' il
-termine anatomico si cancella esattamente.
+Substrate: full-dose slices (treated as low-noise truth), plus a realisation
+of FBP-like noise at the level measured from the real full-dose / reduced-dose
+contrast of the same protocol cell. The variance of d' is taken **over noise
+realisations at the same site**, so the anatomical term cancels exactly.
+
+Everything is reported per denoiser as well as pooled: pooling over denoisers
+averages a filter the metric rejects (Gaussian) with one it prefers
+(bilateral), and the pooled verdict hides the difference.
 
     .venv/bin/python scripts/exp_lesions.py --n-slices 24 --realizations 16
 """
@@ -32,9 +35,9 @@ from __future__ import annotations
 
 import os
 
-# Un thread per processo: il parallelismo lo diamo con i processi, e lasciare
-# che ogni worker apra i propri thread BLAS porta a oversubscription (load 90
-# su 32 core, misurato) invece che a velocita'. Va fatto prima di numpy.
+# One thread per process: parallelism comes from processes, and letting every
+# worker open its own BLAS threads causes oversubscription (load 90 on 32
+# cores, measured) instead of speed. Must be set before importing numpy.
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_v, "1")
@@ -61,8 +64,8 @@ from riqe.model import RCOND, mahalanobis_mixed  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "experiments"
 
-#: lesioni: (diametro mm, contrasto HU).  Coprono da chiaramente rilevabile a
-#: sotto soglia, per vedere dove il filtraggio fa danno per primo.
+#: lesions: (diameter mm, contrast HU). They range from clearly detectable to
+#: below threshold, to see where filtering does harm first.
 LESIONS = ((10.0, 25.0), (6.0, 15.0), (4.0, 10.0))
 N_SITES = 16
 
@@ -91,7 +94,7 @@ def _one(job):
     ps = meta["pixel_spacing"]
     rng = np.random.default_rng(seed)
 
-    # siti disgiunti per ciascuna combinazione di lesione
+    # disjoint sites for each lesion type
     groups, used = [], []
     for dmm, contrast in LESIONS:
         r = dmm / 2.0 / ps
@@ -116,7 +119,7 @@ def _one(job):
     noise_seeds = [seed + 100 + k for k in range(K)]
     noisy0 = dg.add_fbp_noise(hu, noise_sigma, np.random.default_rng(noise_seeds[0]))
 
-    conditions = [("nessuno", None, np.nan)]
+    conditions = [("none", None, np.nan)]
     for name in dg.DENOISERS:
         for lvl in dg.RESIDUAL_LEVELS_HU:
             st, res, _ = dg.calibrate_strength(noisy0, name, float(lvl), body)
@@ -124,12 +127,12 @@ def _one(job):
 
     rows = []
     for cname, filt, lvl in conditions:
-        # punteggio RIQE sull'immagine rumorosa filtrata, senza lesioni
+        # RIQE score of the filtered noisy image, without lesions
         img = filt(noisy0) if filt is not None else noisy0
         sc = _score(img, pad, masks, spec, model)
         res_hu = dg.residual_std(noisy0, img, body) if filt is not None else 0.0
 
-        # risposte del template, su K realizzazioni, con e senza lesioni
+        # template responses over K realisations, with and without lesions
         resp_abs = {i: [] for i in range(len(groups))}
         resp_sig = {i: [] for i in range(len(groups))}
         peak = {i: [] for i in range(len(groups))}
@@ -167,10 +170,10 @@ def _one(job):
                 "noise_sigma_hu": noise_sigma,
                 "denoiser": cname, "target_residual_hu": lvl, "residual_hu": res_hu,
                 "riqe": sc,
-                "diametro_mm": g["dmm"], "contrasto_hu": g["contrast"], "n_siti": len(g["sites"]),
+                "diameter_mm": g["dmm"], "contrast_hu": g["contrast"], "n_sites": len(g["sites"]),
                 "dprime": float(np.nanmean(dp)),
-                "ritenzione_matched": float(np.nanmean(delta) / ref) if ref else np.nan,
-                "ritenzione_picco": float(np.nanmean(peak[i])) if peak[i] else np.nan,
+                "retention_matched": float(np.nanmean(delta) / ref) if ref else np.nan,
+                "retention_peak": float(np.nanmean(peak[i])) if peak[i] else np.nan,
             })
     return rows
 
@@ -192,7 +195,7 @@ def main() -> int:
     C = args.C if args.C is not None else ch.get("C")
     p = args.p if args.p is not None else ch.get("p")
     if P is None:
-        ap.error("servono --P --C --p, oppure experiments/hparam_choice.json")
+        ap.error("need --P --C --p, or experiments/hparam_choice.json")
 
     corpus = pd.read_parquet(ROOT / "corpus" / "corpus.parquet")
     split = json.load(open(ROOT / "corpus" / "split.json"))
@@ -201,8 +204,8 @@ def main() -> int:
     fit = corpus[(corpus["kind"] == "full") & corpus["keep"] & corpus.patient_id.isin(fit_pids)]
     model = cache.fit(list(fit["path"]), p, n_patients=fit.patient_id.nunique())
 
-    # livello di rumore da aggiungere: misurato sul contrasto reale
-    # dose piena / dose ridotta della stessa cella
+    # noise level to add: measured from the real full-dose / reduced-dose
+    # contrast of the same cell
     slices = pd.read_parquet(ROOT / "corpus" / "slices.parquet")
     noise_by_cell = {}
     for cell, g in slices.groupby("cell"):
@@ -211,24 +214,24 @@ def main() -> int:
         if np.isfinite(lo):
             noise_by_cell[cell] = float(np.sqrt(max(lo ** 2 - fu ** 2, 1.0)))
     default_noise = float(np.median(list(noise_by_cell.values()))) if noise_by_cell else 25.0
-    print("rumore aggiunto per cella (sigma HU, da dose piena vs ridotta reale):")
+    print("added noise per cell (sigma HU, from real full vs reduced dose):")
     for k, v in noise_by_cell.items():
         print(f"  {k:26s} {v:6.1f}")
-    print(f"  celle senza coppia reale: {default_noise:.1f} (mediana delle altre)")
+    print(f"  cells without a real pair: {default_noise:.1f} (median of the others)")
 
-    # slice di prova: addome (parenchima epatico omogeneo), dallo split TEST
+    # test slices: abdomen (homogeneous liver parenchyma), from the TEST split
     cand = corpus[(corpus["kind"] == "full") & corpus["keep"]
                   & corpus.patient_id.isin(test_pids)
                   & corpus["body_part"].eq("ABDOMEN")]
-    # una slice centrale per paziente.  Selezione esplicita invece di
-    # groupby.apply: con include_groups=False pandas toglie la colonna di
-    # raggruppamento dal risultato, e il codice a valle la cerca.
+    # one central slice per patient. Explicit selection instead of
+    # groupby.apply: with include_groups=False pandas drops the grouping
+    # column from the result, and downstream code looks for it.
     rng = np.random.default_rng(args.seed)
     idx = [g.sort_values("z").index[len(g) // 2] for _, g in cand.groupby("patient_id")]
     pick = cand.loc[idx]
     if len(pick) > args.n_slices:
         pick = pick.iloc[np.sort(rng.choice(len(pick), args.n_slices, replace=False))]
-    print(f"\nslice di prova: {len(pick)} (addome, split TEST, {pick.patient_id.nunique()} pazienti)")
+    print(f"\ntest slices: {len(pick)} (abdomen, TEST split, {pick.patient_id.nunique()} patients)")
 
     jobs = [(r.path, r.cell, noise_by_cell.get(r.cell, default_noise), args.seed + 977 * i)
             for i, r in enumerate(pick.itertuples())]
@@ -241,58 +244,82 @@ def main() -> int:
     ) as ex:
         for i, rr in enumerate(ex.map(_one, jobs, chunksize=1), 1):
             rows += rr
-            print(f"  {i}/{len(jobs)} slice, {len(rows)} righe, {(time.time()-t0)/60:.1f} min",
+            print(f"  {i}/{len(jobs)} slices, {len(rows)} rows, {(time.time()-t0)/60:.1f} min",
                   flush=True)
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT / "exp2_form2_lesions.csv", index=False)
-    print(f"\nscritto {OUT}/exp2_form2_lesions.csv  ({(time.time()-t0)/60:.1f} min)")
+    print(f"\nwrote {OUT}/exp2_form2_lesions.csv  ({(time.time()-t0)/60:.1f} min)")
 
-    # ---- la domanda centrale ---------------------------------------------
-    base = df[df.denoiser == "nessuno"].set_index(["slice_path", "diametro_mm"])
-    f = df[df.denoiser != "nessuno"].copy()
-    f["riqe_base"] = [base.riqe.get((r.slice_path, r.diametro_mm), np.nan) for r in f.itertuples()]
-    f["riqe_migliora"] = f["riqe"] < f["riqe_base"]
+    # ---- the central question ---------------------------------------------
+    base = df[df.denoiser == "none"].set_index(["slice_path", "diameter_mm"])
+    f = df[df.denoiser != "none"].copy()
+    f["riqe_base"] = [base.riqe.get((r.slice_path, r.diameter_mm), np.nan) for r in f.itertuples()]
+    f["riqe_improves"] = f["riqe"] < f["riqe_base"]
 
     print("\n" + "=" * 78)
-    print("RISULTATO PRINCIPALE - RIQE contro fedelta' del segnale")
+    print("MAIN RESULT - RIQE versus signal fidelity")
     print("=" * 78)
-    agg = (f.groupby(["target_residual_hu", "diametro_mm"])
-             .agg(riqe=("riqe", "median"), riqe_migliora=("riqe_migliora", "mean"),
-                  ritenzione_matched=("ritenzione_matched", "median"),
-                  ritenzione_picco=("ritenzione_picco", "median"),
+    agg = (f.groupby(["target_residual_hu", "diameter_mm"])
+             .agg(riqe=("riqe", "median"), riqe_improves=("riqe_improves", "mean"),
+                  retention_matched=("retention_matched", "median"),
+                  retention_peak=("retention_peak", "median"),
                   dprime=("dprime", "median")).reset_index())
+    print("pooled over denoisers:")
     print(agg.round(3).to_string(index=False))
 
-    piv = agg.pivot(index="target_residual_hu", columns="diametro_mm", values="ritenzione_matched")
+    piv = agg.pivot(index="target_residual_hu", columns="diameter_mm", values="retention_matched")
     riqe_med = f.groupby("target_residual_hu")["riqe"].median()
     base_med = base.riqe.median()
-    print(f"\npunteggio RIQE mediano senza filtro: {base_med:.4f}")
+    print(f"\nmedian RIQE score without filtering: {base_med:.4f}")
     best_lvl = riqe_med.idxmin()
-    print(f"intensita' che ottimizza RIQE: residuo {best_lvl:g} HU "
-          f"(punteggio {riqe_med.min():.4f})")
+    print(f"strength that optimises RIQE (pooled): residual {best_lvl:g} HU "
+          f"(score {riqe_med.min():.4f})")
     for dmm in sorted(piv.columns):
         col = piv[dmm]
-        crolla = col[col < 0.5]
-        first = crolla.index.min() if len(crolla) else None
-        print(f"  lesione {dmm:4.0f} mm: ritenzione a quell'intensita' = "
+        collapsed = col[col < 0.5]
+        first = collapsed.index.min() if len(collapsed) else None
+        print(f"  lesion {dmm:4.0f} mm: retention at that strength = "
               f"{col.get(best_lvl, np.nan):.3f}"
-              + (f"; scende sotto 0,5 a residuo {first:g} HU" if first is not None else
-                 "; non scende mai sotto 0,5"))
-    verdetto = (
-        "PERICOLOSO: l'ottimo di RIQE cade dove la fedelta' del segnale e' gia' crollata"
+              + (f"; falls below 0.5 at residual {first:g} HU" if first is not None else
+                 "; never falls below 0.5"))
+    verdict = (
+        "DANGEROUS: the RIQE optimum falls where signal fidelity has already collapsed"
         if any(piv[c].get(best_lvl, 1.0) < 0.5 for c in piv.columns)
-        else "l'ottimo di RIQE non cade nella regione di crollo del segnale"
+        else "the pooled RIQE optimum does not fall in the region of signal collapse"
     )
-    print(f"\nVERDETTO: {verdetto}")
+    print(f"\nPOOLED VERDICT: {verdict}")
+
+    # ---- per denoiser: the pooled verdict hides the difference -------------
+    per = (f.groupby(["denoiser", "target_residual_hu", "diameter_mm"])
+             .agg(riqe_improves=("riqe_improves", "mean"),
+                  retention_matched=("retention_matched", "median"),
+                  retention_peak=("retention_peak", "median"),
+                  dprime=("dprime", "median")).reset_index())
+    print("\nper denoiser, fraction of images in which filtering improves RIQE:")
+    print((100 * per.pivot_table(index="denoiser", columns="target_residual_hu",
+                                 values="riqe_improves", aggfunc="mean")).round(1).to_string())
+    by_denoiser = {}
+    for name, g in per.groupby("denoiser"):
+        by_denoiser[name] = {
+            "riqe_improves_by_strength": g.groupby("target_residual_hu")["riqe_improves"].mean().to_dict(),
+            "retention_matched": g.pivot(index="target_residual_hu", columns="diameter_mm",
+                                         values="retention_matched").to_dict(),
+            "retention_peak": g.pivot(index="target_residual_hu", columns="diameter_mm",
+                                      values="retention_peak").to_dict(),
+            "dprime": g.pivot(index="target_residual_hu", columns="diameter_mm",
+                              values="dprime").to_dict(),
+        }
+
     (OUT / "exp2_form2_summary.json").write_text(json.dumps({
-        "riqe_base_mediano": float(base_med),
-        "intensita_ottima_riqe_hu": float(best_lvl),
-        "riqe_ottimo": float(riqe_med.min()),
-        "riqe_per_intensita": riqe_med.to_dict(),
-        "ritenzione_matched": piv.to_dict(),
-        "frazione_casi_riqe_migliora": float(f["riqe_migliora"].mean()),
-        "verdetto": verdetto,
+        "riqe_base_median": float(base_med),
+        "riqe_optimal_strength_hu": float(best_lvl),
+        "riqe_optimum": float(riqe_med.min()),
+        "riqe_by_strength": riqe_med.to_dict(),
+        "retention_matched": piv.to_dict(),
+        "fraction_cases_riqe_improves": float(f["riqe_improves"].mean()),
+        "pooled_verdict": verdict,
+        "by_denoiser": by_denoiser,
         "n_slices": int(df.slice_path.nunique()),
         "realizations": args.realizations,
     }, indent=1, default=float))

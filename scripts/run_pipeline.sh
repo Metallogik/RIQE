@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Esegue in sequenza tutto cio' che resta dopo la costruzione del corpus.
+# Runs in sequence everything that follows corpus construction.
 #
-# Ogni passo scrive il proprio log in logs/, e la pipeline si ferma al primo
-# errore: un passo che fallisce in silenzio lascerebbe i passi successivi a
-# lavorare su risultati vecchi, che e' il modo peggiore di sbagliare.
+# Prerequisites (see README.md): download_corpus.py, build_slice_table.py,
+# make_corpus.py and cache_features.py have been run, and, for experiment 6,
+# the LDCTIQAC 2023 training set is unpacked in data/ldctiqac/.
+#
+# Each step writes its own log to logs/, and the pipeline stops at the first
+# error: a step that fails silently would leave the following steps working
+# on stale results, which is the worst way to be wrong.
 #
 #   nohup bash scripts/run_pipeline.sh > logs/pipeline.log 2>&1 &
 #
-# Riprendibile: i passi gia' completati (file di uscita presente) si saltano.
+# Resumable: steps already completed (output file present) are skipped.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -16,67 +20,68 @@ mkdir -p logs experiments artifacts
 
 W=${WORKERS:-30}
 
-step() {                       # step <nome> <file-di-uscita> <comando...>
+step() {                       # step <name> <output-file> <command...>
   local name="$1" out="$2"; shift 2
   if [ -e "$out" ]; then
-    echo "[$(date +%H:%M:%S)] salto $name (gia' presente: $out)"
+    echo "[$(date +%H:%M:%S)] skipping $name (already present: $out)"
     return 0
   fi
   echo "[$(date +%H:%M:%S)] --- $name ---"
   "$@" 2>&1 | tee "logs/$name.log"
-  echo "[$(date +%H:%M:%S)] fine $name"
+  echo "[$(date +%H:%M:%S)] done $name"
 }
 
-# attende il banco di validazione se un'altra esecuzione lo sta ancora creando
-while pgrep -f "prepare_bank.py --split val_inner" > /dev/null; do
-  echo "[$(date +%H:%M:%S)] attendo il banco val_inner ancora in costruzione..."
-  sleep 30
-done
-
-step banco_val experiments/bank_val_inner.json \
+step bank_val experiments/bank_val_inner.json \
   $PY scripts/prepare_bank.py --split val_inner --per-patient 4 --workers "$W"
 
-step momenti_val experiments/bank_val_inner_moments.npz \
+step moments_val experiments/bank_val_inner_moments.npz \
   $PY scripts/score_bank.py --bank experiments/bank_val_inner.json --workers "$W"
 
-# griglia di C estesa verso il basso (0,05 / 0,025 / 0,01): il meccanismo
-# del livello di rumore preferito passa per C (docs/05 §8.3)
-step momenti_val_lowC experiments/bank_val_inner_moments_lowC.npz \
+# C grid extended downwards (0.05 / 0.025 / 0.01): the mechanism of the
+# preferred noise level goes through C
+step moments_val_lowC experiments/bank_val_inner_moments_lowC.npz \
   $PY scripts/score_bank.py --bank experiments/bank_val_inner.json --workers "$W" \
      --P 16,24,32 --C 0.05,0.025,0.01 --out experiments/bank_val_inner_moments_lowC.npz
 
-step ricerca_iperparametri experiments/hparam_choice.json \
+step hparam_search experiments/hparam_choice.json \
   $PY scripts/search_hparams.py --bootstrap 60 --moments \
      experiments/bank_val_inner_moments.npz experiments/bank_val_inner_moments_lowC.npz
 
-step fit_modello artifacts/riqe-v1.0.json \
+step fit_model artifacts/riqe-v1.0.json \
   $PY scripts/fit_model.py
 
-step stratificazione experiments/stratification.csv \
+step stratification experiments/stratification.csv \
   $PY scripts/stratification.py --B 200
 
-step banco_test experiments/bank_test.json \
+step bank_test experiments/bank_test.json \
   $PY scripts/prepare_bank.py --split test --per-patient 6 --fine-noise --rel-noise --workers "$W"
 
-# su TEST servono solo la configurazione scelta e quella del criterio originale
+# on TEST only the chosen setting and the original-criterion setting are needed
 PLIST=$($PY -c "import json;c=json.load(open('experiments/hparam_choice.json'));o=c['original_criterion_choice'];print(','.join(sorted({str(c['P']),str(o['P'])})))")
 CLIST=$($PY -c "import json;c=json.load(open('experiments/hparam_choice.json'));o=c['original_criterion_choice'];print(','.join(sorted({repr(float(c['C'])),repr(float(o['C']))})))")
-echo "[$(date +%H:%M:%S)] configurazioni per TEST: P=$PLIST C=$CLIST"
+echo "[$(date +%H:%M:%S)] settings for TEST: P=$PLIST C=$CLIST"
 
-step momenti_test experiments/bank_test_moments.npz \
+step moments_test experiments/bank_test_moments.npz \
   $PY scripts/score_bank.py --bank experiments/bank_test.json --workers "$W" --P "$PLIST" --C "$CLIST"
 
-step batteria experiments/battery_summary.json \
+step battery experiments/battery_summary.json \
   $PY scripts/run_battery.py --moments experiments/bank_test_moments.npz --bootstrap 200
 
-step lesioni experiments/exp2_form2_summary.json \
+step lesions experiments/exp2_form2_summary.json \
   $PY scripts/exp_lesions.py --n-slices 24 --realizations 16 --workers "$W"
 
-step baseline_fotografica experiments/exp5_summary.json \
+step photo_baseline experiments/exp5_summary.json \
   $PY scripts/exp5_photo_baseline.py --n-photos 125 --moments experiments/bank_test_moments.npz \
      --workers 16
 
-step verifica artifacts/verify_ok.txt \
+if [ -e data/ldctiqac/LDCTIQAG2023_train/train.json ]; then
+  step ldctiqac experiments/exp6_ldctiqac_summary.json \
+    $PY scripts/exp6_ldctiqac.py --workers "$W"
+else
+  echo "[$(date +%H:%M:%S)] skipping ldctiqac: data/ldctiqac/LDCTIQAG2023_train not found"
+fi
+
+step verify artifacts/verify_ok.txt \
   bash -c "$PY scripts/verify_model.py | tee artifacts/verify_ok.txt"
 
-echo "[$(date +%H:%M:%S)] PIPELINE COMPLETA"
+echo "[$(date +%H:%M:%S)] PIPELINE COMPLETE"

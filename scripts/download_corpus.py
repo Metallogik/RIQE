@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Scarica le serie di immagini ricostruite di LDCT-and-Projection-Data.
+"""Download the reconstructed image series of LDCT-and-Projection-Data.
 
-Scarica solo le serie `Full Dose Images` e `Low Dose Images` (38 GB): i dati
-di proiezione (1,25 TB) non servono.  Usa `getImage`, che consegna la serie
-come zip: a parita' di byte e' piu' veloce di `getSingleImage` slice per
-slice, e ci da' l'intera serie, quindi l'ordinamento anatomico esatto e
-l'appaiamento esatto fra dose piena e dose ridotta.
+Only the `Full Dose Images` and `Low Dose Images` series are downloaded
+(38 GB): the projection data (1.25 TB) are not needed. Uses `getImage`, which
+delivers a series as a zip: per byte it is faster than `getSingleImage` slice
+by slice, and it gives the whole series, hence the exact anatomical ordering
+and the exact pairing of full and reduced dose.
 
-Idempotente e riprendibile: una serie gia' estratta viene saltata.  Ogni
-slice e' registrata con il suo SHA-256 in data/manifest/<uid>.json, che
-finisce nell'artefatto modello come identita' del corpus.
+The list of series is read from corpus/series.json, the exact list used for
+the released model. If that file is missing, it is fetched from the public
+NBIA API (the collection may have changed since).
+
+Idempotent and resumable: a series already extracted is skipped. Every slice
+is recorded with its SHA-256 in data/manifest/<uid>.json, which ends up in the
+model artefact as the identity of the corpus.
 
     .venv/bin/python scripts/download_corpus.py [--workers 8] [--only full|low]
 """
@@ -29,17 +33,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from riqe.tcia import BASE, _get  # noqa: E402
+from riqe.tcia import BASE, _get, get_series  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 DICOM = ROOT / "data" / "dicom"
 MANIFEST = ROOT / "data" / "manifest"
 
 WANTED = {"Full Dose Images": "full", "Low Dose Images": "low"}
-
-
-def slug(s: str) -> str:
-    return s.lower().replace(" ", "_")
 
 
 def download_series(rec: dict) -> dict:
@@ -54,7 +54,7 @@ def download_series(rec: dict) -> dict:
     t0 = time.time()
     raw = _get(f"{BASE}/getImage?SeriesInstanceUID={uid}", timeout=3600)
     if not raw[:2] == b"PK":
-        raise RuntimeError(f"{pid}/{kind}: risposta non zip ({raw[:80]!r})")
+        raise RuntimeError(f"{pid}/{kind}: response is not a zip ({raw[:80]!r})")
 
     out.mkdir(parents=True, exist_ok=True)
     files = []
@@ -103,14 +103,19 @@ def main() -> int:
     ap.add_argument("--only", choices=["full", "low", "both"], default="both")
     args = ap.parse_args()
 
-    series = json.load(open(ROOT / "corpus" / "series.json"))
+    series_file = ROOT / "corpus" / "series.json"
+    if not series_file.exists():
+        print("corpus/series.json not found: fetching the series list from NBIA", flush=True)
+        series_file.parent.mkdir(parents=True, exist_ok=True)
+        series_file.write_text(json.dumps(get_series()))
+    series = json.load(open(series_file))
     todo = [s for s in series if s.get("SeriesDescription") in WANTED]
     if args.only != "both":
         todo = [s for s in todo if WANTED[s["SeriesDescription"]] == args.only]
-    # le piu' piccole per prime: si vede subito se qualcosa non va
+    # smallest first: problems show up immediately
     todo.sort(key=lambda s: int(s.get("FileSize") or 0))
 
-    print(f"serie da scaricare: {len(todo)}  "
+    print(f"series to download: {len(todo)}  "
           f"({sum(int(s['FileSize']) for s in todo)/1e9:.1f} GB)  workers={args.workers}",
           flush=True)
 
@@ -125,15 +130,15 @@ def main() -> int:
                 done += 1
                 if r["status"] == "ok":
                     print(f"[{done}/{len(todo)}] {r['pid']}/{r['kind']} "
-                          f"{r['n']} slice {r['mb']:.0f} MB in {r['s']:.0f}s "
-                          f"| totale {(time.time()-t0)/60:.1f} min", flush=True)
+                          f"{r['n']} slices {r['mb']:.0f} MB in {r['s']:.0f}s "
+                          f"| total {(time.time()-t0)/60:.1f} min", flush=True)
             except Exception as e:  # noqa: BLE001
                 errors += 1
-                print(f"ERRORE {s['PatientID']} {s['SeriesDescription']}: {e}", flush=True)
+                print(f"ERROR {s['PatientID']} {s['SeriesDescription']}: {e}", flush=True)
 
     used = shutil.disk_usage(DICOM.parent).used
-    print(f"FINITO: {done} serie, {errors} errori, {(time.time()-t0)/60:.1f} min, "
-          f"disco usato {used/1e9:.0f} GB", flush=True)
+    print(f"DONE: {done} series, {errors} errors, {(time.time()-t0)/60:.1f} min, "
+          f"disk used {used/1e9:.0f} GB", flush=True)
     return 1 if errors else 0
 
 

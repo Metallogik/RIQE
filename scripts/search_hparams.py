@@ -1,42 +1,40 @@
 #!/usr/bin/env python3
-"""Ricerca degli iperparametri (P, C, p) con criterio lessicografico.
+"""Search of the hyperparameters (P, C, p) with a lexicographic criterion.
 
-Il criterio e' dichiarato **prima** di eseguire (docs/01-proposta.md 4), e in
-quest'ordine:
+ORIGINAL CRITERION, declared **before** running, in this order:
 
-  1. SICUREZZA AL SOVRAFILTRAGGIO.  Numero di casi in cui un'immagine
-     filtrata prende un punteggio migliore dell'originale a dose piena.
-     Deve essere 0: le configurazioni che falliscono sono **eliminate**, non
-     penalizzate.
-  2. MONOTONICITA'.  Ordinamento corretto a ogni passo delle scale di rumore
-     (bianco e tipo FBP) e di sfocatura.
-  3. STABILITA'.  Divergenza mediana di bootstrap sui pazienti.
-  4. PARSIMONIA E CONDIZIONAMENTO.  A pari prestazione, la configurazione con
-     piu' patch per immagine e Sigma meglio condizionata.
+  1. OVERFILTERING SAFETY. Number of cases in which a filtered image scores
+     better than the full-dose original. Must be 0: settings that fail are
+     **eliminated**, not penalised.
+  2. MONOTONICITY. Correct ordering at every step of the noise (white and
+     FBP-like) and blur ladders.
+  3. STABILITY. Median bootstrap divergence over patients.
+  4. PARSIMONY AND CONDITIONING. At equal performance, the setting with more
+     patches per image and a better-conditioned Sigma.
 
-Non e' il criterio di Computers 2025, che ottimizza la frazione di immagini
-in cui la rete piu' profonda risulta il miglior denoiser: quello assume la
-risposta e la usa come bersaglio.
+This is not the criterion of Gunawan et al. (Computers 2025), who maximise the
+fraction of images on which the deepest network is ranked the best denoiser:
+that assumes the answer and uses it as the target.
 
-CRITERIO RIVISTO, dichiarato come tale (docs/05 §8, docs/06).  Il criterio
-sopra era cieco alla proprieta' piu' importante -- l'ordinamento della dose
-ridotta reale -- e ha scelto una configurazione che la ordina correttamente
-solo nel 38,5% degli addomi.  Dopo aver visto i dati di validazione, e con
-l'accordo esplicito del committente, il criterio diventa:
+REVISED CRITERION, declared as such. The criterion above was blind to the most
+important property -- the ordering of real reduced-dose images -- and selected
+a setting that ranks it correctly in only 38.5% of abdominal validation pairs.
+After inspecting validation data, and before touching the test set, the
+criterion becomes:
 
-  1. DOSE REALE.  Frazione di coppie (dose piena, dose ridotta reale, stessa
-     slice) in cui la dose ridotta ha punteggio peggiore, presa al minimo fra
-     torace e addome.  Soglia di superamento 0,95.
-  2. SOVRAFILTRAGGIO.  Frazione di immagini filtrate che battono l'originale:
-     minima.
-  3. RUMORE RELATIVO.  Frazione di immagini con rumore aggiunto >= 20% del
-     rumore nativo che peggiorano: massima.
-  4. STABILITA', poi patch per immagine.
-Se nessuna configurazione supera la soglia del punto 1, si ordina per il
-punto 1 e poi per il punto 2.  La scelta del criterio originale viene
-calcolata e riportata accanto, non sostituita di nascosto.
+  1. REAL DOSE. Fraction of (full dose, real reduced dose, same slice) pairs in
+     which the reduced-dose image scores worse, taken as the minimum over chest
+     and abdomen. Pass threshold 0.95.
+  2. OVERFILTERING. Fraction of filtered images scoring better than the
+     original: lowest.
+  3. RELATIVE NOISE. Fraction of images with added noise >= 20% of native noise
+     that score worse: highest.
+  4. STABILITY, then patches per image.
+If no setting passes point 1, settings are ranked by point 1, then point 2.
+The choice of the original criterion is computed and reported alongside, not
+silently replaced.
 
-Tutto sul solo split interno di FIT.  TEST non viene toccato.
+Everything on the inner split of FIT only. TEST is not touched.
 
     .venv/bin/python scripts/search_hparams.py \
         --moments experiments/bank_val_inner_moments.npz
@@ -46,9 +44,9 @@ from __future__ import annotations
 
 import os
 
-# Un thread per processo: il parallelismo lo diamo con i processi, e lasciare
-# che ogni worker apra i propri thread BLAS porta a oversubscription (load 90
-# su 32 core, misurato) invece che a velocita'. Va fatto prima di numpy.
+# One thread per process: parallelism comes from processes, and letting every
+# worker open its own BLAS threads causes oversubscription (load 90 on 32
+# cores, measured) instead of speed. Must be set before importing numpy.
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_v, "1")
@@ -76,7 +74,7 @@ REL_NOISE_MIN = 0.20
 
 
 def load_moments(paths):
-    """Uno o piu' file di momenti, concatenati; l'indice resta la riga."""
+    """One or more moment files, concatenated; the index is the row."""
     NUs, SGs, metas = [], [], []
     for path in paths:
         z = np.load(path, allow_pickle=False)
@@ -92,7 +90,7 @@ def load_moments(paths):
 
 
 def score_rows(model, NU, SG, idx) -> np.ndarray:
-    """Punteggio di un insieme di righe di momenti contro un modello."""
+    """Scores of a set of moment rows against a model."""
     out = np.full(len(idx), np.nan)
     for k, i in enumerate(idx):
         if np.isnan(NU[i, 0]):
@@ -102,7 +100,7 @@ def score_rows(model, NU, SG, idx) -> np.ndarray:
 
 
 def bootstrap_divergence(cache, paths_by_patient, p, B, seed) -> np.ndarray:
-    """D(modello completo, modello su un bootstrap dei pazienti)."""
+    """D(full model, model on a patient bootstrap sample)."""
     rng = np.random.default_rng(seed)
     pids = sorted(paths_by_patient)
     allp = [q for pid in pids for q in paths_by_patient[pid]]
@@ -135,23 +133,23 @@ def main() -> int:
     by_patient = defaultdict(list)
     for r in fit_slices.itertuples():
         by_patient[r.patient_id].append(r.path)
-    print(f"fitting interno: {len(by_patient)} pazienti, {len(fit_slices)} slice")
+    print(f"inner fitting set: {len(by_patient)} patients, {len(fit_slices)} slices")
 
     NU, SG, meta = load_moments(args.moments)
     configs = sorted({(int(r.P), float(r.C)) for r in meta.itertuples()})
-    print(f"banco: {len(meta)} righe, {meta.slice_path.nunique()} slice, "
-          f"{len(configs)} configurazioni (P, C)")
+    print(f"bank: {len(meta)} rows, {meta.slice_path.nunique()} slices, "
+          f"{len(configs)} (P, C) settings")
 
-    # rumore nativo per slice, per esprimere il rumore aggiunto in termini relativi
+    # native noise per slice, to express added noise in relative terms
     slices_tab = pd.read_parquet(ROOT / "corpus" / "slices.parquet").set_index("path")
     sigma_nat = slices_tab["body_sigma_med"]
 
-    # coppie di dose reale sullo split di validazione interno
+    # real-dose pairs on the inner validation split
     pairs = dose_pairs(corpus, split["val_inner"])
-    print(f"coppie di dose reale (validazione): {len(pairs)} "
-          f"(torace {int((pairs.region=='torace').sum())}, addome {int((pairs.region=='addome').sum())})")
+    print(f"real-dose pairs (validation): {len(pairs)} "
+          f"(chest {int((pairs.region=='chest').sum())}, abdomen {int((pairs.region=='abdomen').sum())})")
 
-    # indici delle righe utili, per configurazione
+    # rows of interest, per setting
     full_rows = meta[meta["source"] == "full"]
     results = []
     t0 = time.time()
@@ -174,7 +172,7 @@ def main() -> int:
                 results.append({"P": P, "C": C, "p": p, "error": str(e)})
                 continue
 
-            # --- criterio 1: sicurezza al sovrafiltraggio -----------------
+            # --- criterion 1: overfiltering safety ----------------------------
             den = sub[sub.kind == "denoise"]
             s_orig = score_rows(model, NU, SG, [orig[sp] for sp in den.slice_path])
             s_den = score_rows(model, NU, SG, list(den.index))
@@ -183,14 +181,14 @@ def main() -> int:
             n_fail = int(fail_mask.sum())
             frac_fail = float(fail_mask.sum() / max(ok.sum(), 1))
 
-            # sfocatura: e' anch'essa un sovrafiltraggio del pristine
+            # blur: also an overfiltering of the pristine image
             bl = sub[sub.kind == "blur"]
             sb_o = score_rows(model, NU, SG, [orig[sp] for sp in bl.slice_path])
             sb = score_rows(model, NU, SG, list(bl.index))
             okb = np.isfinite(sb_o) & np.isfinite(sb)
             n_fail_blur = int((okb & (sb < sb_o)).sum())
 
-            # --- criterio 2: monotonicita' --------------------------------
+            # --- criterion 2: monotonicity ------------------------------------
             mono = {}
             for kind, param in (("noise_white", "sigma_hu"), ("noise_fbp", "sigma_hu"),
                                 ("blur", "sigma_px")):
@@ -209,23 +207,23 @@ def main() -> int:
             mono_mean = float(np.nanmean(list(mono.values())))
             mono_min = float(np.nanmin(list(mono.values())))
 
-            # --- dose reale ------------------------------------------------
+            # --- real dose ----------------------------------------------------
             dsum = summarize(dose_ordering(model, pairs, pair_moments))
 
-            # --- rumore relativo -------------------------------------------
+            # --- relative noise -----------------------------------------------
             s_n = score_rows(model, NU, SG, list(noise.index))
-            # l'originale deve esistere: un indice di ripiego come -1 leggerebbe
-            # l'ultima riga dell'array, cioe' il punteggio di un'altra immagine
+            # the original must exist: a fallback index such as -1 would read
+            # the last row of the array, i.e. the score of another image
             s_n0 = score_rows(model, NU, SG, [orig[sp] for sp in noise.slice_path])
             okn = np.isfinite(s_n) & np.isfinite(s_n0)
             rel_detect = float((s_n[okn] > s_n0[okn]).mean()) if okn.any() else np.nan
 
-            # --- criterio 3: stabilita' -----------------------------------
+            # --- criterion 3: stability ---------------------------------------
             d_boot = bootstrap_divergence(cache, by_patient, p, args.bootstrap, args.seed)
             d_med = float(np.nanmedian(d_boot))
             d_p95 = float(np.nanpercentile(d_boot, 95))
 
-            # --- criterio 4: patch e condizionamento ----------------------
+            # --- criterion 4: patches and conditioning ------------------------
             counts = cache.patch_counts([q for v in by_patient.values() for q in v], p)
             n_score_patches = np.asarray([
                 r.n_patches for r in sub[sub.kind == "original"].itertuples()
@@ -233,12 +231,12 @@ def main() -> int:
 
             results.append({
                 "P": P, "C": C, "p": p,
-                "dose_corretto_min": dsum["corretto_min"],
-                "dose_corretto_torace": dsum["corretto_torace"],
-                "dose_corretto_addome": dsum["corretto_addome"],
-                "dose_n_torace": dsum["n_torace"],
-                "dose_n_addome": dsum["n_addome"],
-                "rumore_rel_rilevato": rel_detect,
+                "dose_correct_min": dsum["correct_min"],
+                "dose_correct_chest": dsum["correct_chest"],
+                "dose_correct_abdomen": dsum["correct_abdomen"],
+                "dose_n_chest": dsum["n_chest"],
+                "dose_n_abdomen": dsum["n_abdomen"],
+                "rel_noise_detected": rel_detect,
                 "n_overfilter_fail": n_fail,
                 "frac_overfilter_fail": frac_fail,
                 "n_blur_fail": n_fail_blur,
@@ -255,8 +253,8 @@ def main() -> int:
                     score_rows(model, NU, SG, list(sub[sub.kind == "original"].index)))),
             })
             r = results[-1]
-            print(f"  P={P:3d} C={C:<5g} p={p:<5.2f} | dose t/a={dsum['corretto_torace']:.2f}/"
-                  f"{dsum['corretto_addome']:.2f} | rum.rel={rel_detect:.2f} | sovrafiltr.={n_fail:4d} "
+            print(f"  P={P:3d} C={C:<5g} p={p:<5.2f} | dose c/a={dsum['correct_chest']:.2f}/"
+                  f"{dsum['correct_abdomen']:.2f} | rel.noise={rel_detect:.2f} | overfilt.={n_fail:4d} "
                   f"({100*frac_fail:5.1f}%) blur_fail={n_fail_blur:3d} | mono={mono_mean:.3f} "
                   f"(min {mono_min:.3f}) | D_boot={d_med:.4f} | patch/slice={r['fit_patches_per_slice']:6.1f}"
                   f" | cond={model.cond():.1e}", flush=True)
@@ -264,17 +262,17 @@ def main() -> int:
     df = pd.DataFrame(results)
     out = ROOT / args.out
     df.to_csv(out, index=False)
-    print(f"\nscritto {out}  ({(time.time()-t0)/60:.1f} min)")
+    print(f"\nwrote {out}  ({(time.time()-t0)/60:.1f} min)")
 
-    cols = ["P", "C", "p", "dose_corretto_min", "dose_corretto_torace", "dose_corretto_addome",
-            "rumore_rel_rilevato", "frac_overfilter_fail", "mono_min", "d_boot_median",
+    cols = ["P", "C", "p", "dose_correct_min", "dose_correct_chest", "dose_correct_abdomen",
+            "rel_noise_detected", "frac_overfilter_fail", "mono_min", "d_boot_median",
             "fit_patches_per_slice", "score_patches_median", "cond_sigma"]
 
-    # --- 1. criterio ORIGINALE, dichiarato prima di eseguire ----------------
-    print("\n=== criterio originale (dichiarato prima di eseguire) ===")
+    # --- 1. ORIGINAL criterion, declared before running --------------------
+    print("\n=== original criterion (declared before running) ===")
     safe = df[df["n_overfilter_fail"] == 0]
     if len(safe) == 0:
-        print("NESSUNA configurazione e' sicura al sovrafiltraggio (criterio 1 = 0).")
+        print("NO setting is safe against overfiltering (criterion 1 = 0).")
         ranked_o = df.sort_values(
             ["frac_overfilter_fail", "mono_min", "mono_mean", "d_boot_median"],
             ascending=[True, False, False, True])
@@ -283,24 +281,24 @@ def main() -> int:
             ["mono_min", "mono_mean", "d_boot_median", "fit_patches_per_slice"],
             ascending=[False, False, True, False])
     best_o = ranked_o.iloc[0]
-    print(f"scelta originale: P={int(best_o.P)} C={best_o.C:g} p={best_o.p:g}  "
-          f"(dose t/a {best_o.dose_corretto_torace:.3f}/{best_o.dose_corretto_addome:.3f}, "
-          f"sovrafiltr. {100*best_o.frac_overfilter_fail:.1f}%)")
+    print(f"original choice: P={int(best_o.P)} C={best_o.C:g} p={best_o.p:g}  "
+          f"(dose c/a {best_o.dose_correct_chest:.3f}/{best_o.dose_correct_abdomen:.3f}, "
+          f"overfiltering {100*best_o.frac_overfilter_fail:.1f}%)")
 
-    # --- 2. criterio RIVISTO -------------------------------------------------
-    print("\n=== criterio rivisto (dose reale prima) ===")
-    passing = df[df["dose_corretto_min"] >= DOSE_PASS]
+    # --- 2. REVISED criterion -------------------------------------------------
+    print("\n=== revised criterion (real dose first) ===")
+    passing = df[df["dose_correct_min"] >= DOSE_PASS]
     if len(passing):
-        print(f"configurazioni con dose reale ordinata >= {DOSE_PASS:.0%} in entrambe le regioni: "
+        print(f"settings ranking real dose correctly >= {DOSE_PASS:.0%} in both regions: "
               f"{len(passing)}/{len(df)}")
         ranked = passing.sort_values(
-            ["frac_overfilter_fail", "rumore_rel_rilevato", "d_boot_median", "fit_patches_per_slice"],
+            ["frac_overfilter_fail", "rel_noise_detected", "d_boot_median", "fit_patches_per_slice"],
             ascending=[True, False, True, False])
     else:
-        print(f"NESSUNA configurazione ordina la dose reale >= {DOSE_PASS:.0%} in entrambe le "
-              f"regioni: ordinamento per dose, poi sovrafiltraggio.")
+        print(f"NO setting ranks real dose correctly >= {DOSE_PASS:.0%} in both regions: "
+              f"ranking by dose, then overfiltering.")
         ranked = df.sort_values(
-            ["dose_corretto_min", "frac_overfilter_fail", "rumore_rel_rilevato", "d_boot_median"],
+            ["dose_correct_min", "frac_overfilter_fail", "rel_noise_detected", "d_boot_median"],
             ascending=[False, True, False, True])
     print(ranked[cols].head(15).to_string(index=False))
     best = ranked.iloc[0]
@@ -313,8 +311,8 @@ def main() -> int:
         "declared_before_run": False,
         "revision_reason": ("the pre-declared criterion ignored real-dose ordering and selected "
                             "a configuration ordering reduced-dose abdomen correctly in 38.5% "
-                            "of validation pairs; revised after seeing validation data, "
-                            "with the commissioner's explicit agreement (docs/06)"),
+                            "of validation pairs; revised after seeing validation data and "
+                            "before using the test set"),
         "any_config_passes_dose": bool(len(passing) > 0),
         "any_safe_config_overfiltering": bool(len(safe) > 0),
         "metrics": {k: (float(best[k]) if k in best else None) for k in cols},
@@ -326,7 +324,7 @@ def main() -> int:
             "metrics": {k: (float(best_o[k]) if k in best_o else None) for k in cols},
         },
     }, indent=1))
-    print(f"\nscelta (criterio rivisto): P={int(best.P)} C={best.C:g} p={best.p:g}")
+    print(f"\nchoice (revised criterion): P={int(best.P)} C={best.C:g} p={best.p:g}")
     return 0
 
 

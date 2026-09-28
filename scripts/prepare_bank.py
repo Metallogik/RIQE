@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Costruisce il banco di immagini di prova (ricette, non pixel).
+"""Build the bank of test images (recipes, not pixels).
 
-La calibrazione della forza dei filtri e' costosa e non dipende da (P, C):
-si fa qui, una volta, e il risultato serve sia alla ricerca degli
-iperparametri sia alla batteria di validazione.
+Calibrating filter strengths is expensive and independent of (P, C): it is
+done here, once, and the result serves both the hyperparameter search and the
+validation battery.
 
     .venv/bin/python scripts/prepare_bank.py --split val_inner --per-patient 4
-    .venv/bin/python scripts/prepare_bank.py --split test --per-patient 6 --fine-noise
+    .venv/bin/python scripts/prepare_bank.py --split test --per-patient 6 --fine-noise --rel-noise
 """
 
 from __future__ import annotations
 
 import os
 
-# Un thread per processo: il parallelismo lo diamo con i processi, e lasciare
-# che ogni worker apra i propri thread BLAS porta a oversubscription (load 90
-# su 32 core, misurato) invece che a velocita'. Va fatto prima di numpy.
+# One thread per process: parallelism comes from processes, and letting every
+# worker open its own BLAS threads causes oversubscription (load 90 on 32
+# cores, measured) instead of speed. Must be set before importing numpy.
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_v, "1")
@@ -43,7 +43,7 @@ OUT = ROOT / "experiments"
 _FINE = False
 _REL = False
 
-#: aumenti relativi del rumore nativo per la scala relativa
+#: relative increases of the native noise for the relative ladder
 REL_LEVELS = (0.05, 0.10, 0.20, 0.50, 1.00)
 
 
@@ -80,7 +80,7 @@ def _one(job: tuple):
         fovl, bodyl = masks_for(hul, padl)
         low_entries = build_bank(
             hul, bodyl, source="low", seed=seed + 5000,
-            noise_sigmas=(), blur_sigmas=(),  # sulla dose ridotta interessano i denoiser
+            noise_sigmas=(), blur_sigmas=(),  # on reduced dose only denoisers matter
         )
         rec["low"] = {
             "path": low_path,
@@ -91,8 +91,8 @@ def _one(job: tuple):
 
 
 def match_low_dose(corpus: pd.DataFrame, kept: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Per ciascun paziente con dose ridotta, la tabella delle sue slice a
-    dose ridotta, indicizzata per z: serve per appaiare per posizione."""
+    """For each patient with reduced dose, the table of their reduced-dose
+    slices, sorted by z: used to pair by position."""
     low = corpus[(corpus["kind"] == "low")]
     return {pid: g.sort_values("z") for pid, g in low.groupby("patient_id")}
 
@@ -102,9 +102,9 @@ def main() -> int:
     ap.add_argument("--split", default="val_inner", choices=["val_inner", "fit_inner", "test", "fit"])
     ap.add_argument("--per-patient", type=int, default=4)
     ap.add_argument("--fine-noise", action="store_true",
-                    help="aggiunge la scala fine di rumore da zero (forma 3 del test)")
+                    help="add the fine noise ladder starting at zero (form 3 of the test)")
     ap.add_argument("--rel-noise", action="store_true",
-                    help="aggiunge la scala di rumore relativa al rumore nativo")
+                    help="add the noise ladder relative to native noise")
     ap.add_argument("--workers", type=int, default=24)
     ap.add_argument("--seed", type=int, default=20260917)
     ap.add_argument("--out", default=None)
@@ -123,7 +123,7 @@ def main() -> int:
         idx = np.linspace(0, len(g) - 1, k).round().astype(int)
         chosen.append(g.iloc[np.unique(idx)])
     chosen = pd.concat(chosen, ignore_index=True)
-    print(f"split={args.split}: {chosen.patient_id.nunique()} pazienti, {len(chosen)} slice")
+    print(f"split={args.split}: {chosen.patient_id.nunique()} patients, {len(chosen)} slices")
 
     lows = match_low_dose(corpus, kept)
     jobs = []
@@ -137,7 +137,7 @@ def main() -> int:
         jobs.append((r.path, r.patient_id, r.sop_uid, r.cell,
                      args.seed + 97 * i, "full", low_path, low_sop))
     n_paired = sum(1 for j in jobs if j[6])
-    print(f"slice con dose ridotta appaiata per z: {n_paired}/{len(jobs)}")
+    print(f"slices with a reduced-dose slice paired by z: {n_paired}/{len(jobs)}")
 
     t0 = time.time()
     recs = []
@@ -171,8 +171,8 @@ def main() -> int:
         "denoisers": list(dg.DENOISERS),
         "slices": recs,
     }, indent=1))
-    print(f"scritto {out}: {len(recs)} slice, {n_entries} immagini di prova, "
-          f"{miss} bersagli di residuo non raggiunti, {(time.time()-t0)/60:.1f} min")
+    print(f"wrote {out}: {len(recs)} slices, {n_entries} test images, "
+          f"{miss} residual targets not reached, {(time.time()-t0)/60:.1f} min")
     return 0
 
 

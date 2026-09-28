@@ -9,7 +9,7 @@
   "Liver/Abdomen"
  ],
  "subsets_excluded": {
-  "Head": "NIH Controlled Data Access; non esposto dall'API pubblica NBIA"
+  "Head": "NIH Controlled Data Access; not exposed by the public NBIA API"
  },
  "required_citation": "McCollough, C., Chen, B., Holmes III, D., Duan, X., Yu, Z., Yu, L., Leng, S., Fletcher, J. (2020). Low Dose CT Image and Projection Data (LDCT-and-Projection-data) (Version 7) [dataset]. The Cancer Imaging Archive. https://doi.org/10.7937/9npb-2637",
  "required_acknowledgement": "NIBIB grants EB017095 and EB017185 (PI: Cynthia McCollough)",
@@ -23,44 +23,45 @@
   "S3_max_on_ring": 0.02,
   "S4_metal_hu": 2000.0,
   "S4_max_frac": 0.0001,
+  "S5_enabled": false,
   "S5_max_robust_z": 4.0,
   "S6_per_patient": 24
  },
  "exclusion_report": [
   {
-   "criterio": "S1_interior",
-   "esclusi": 9572,
-   "residui": 37544
+   "criterion": "S1_interior",
+   "excluded": 9572,
+   "remaining": 37544
   },
   {
-   "criterio": "S2_anatomy",
-   "esclusi": 1870,
-   "residui": 35674
+   "criterion": "S2_anatomy",
+   "excluded": 1870,
+   "remaining": 35674
   },
   {
-   "criterio": "S3_untruncated",
-   "esclusi": 0,
-   "residui": 35674
+   "criterion": "S3_untruncated",
+   "excluded": 0,
+   "remaining": 35674
   },
   {
-   "criterio": "S4_no_metal",
-   "esclusi": 736,
-   "residui": 34938
+   "criterion": "S4_no_metal",
+   "excluded": 736,
+   "remaining": 34938
   },
   {
-   "criterio": "S5_no_streak",
-   "esclusi": 0,
-   "residui": 34938
+   "criterion": "S5_no_streak",
+   "excluded": 0,
+   "remaining": 34938
   },
   {
-   "criterio": "S6_sampled",
-   "esclusi": 30186,
-   "residui": 4752
+   "criterion": "S6_sampled",
+   "excluded": 30186,
+   "remaining": 4752
   },
   {
-   "criterio": "TOTALE trattenute",
-   "esclusi": 42364,
-   "residui": 4752
+   "criterion": "TOTAL kept",
+   "excluded": 42364,
+   "remaining": 4752
   }
  ],
  "split": {
@@ -442,8 +443,8 @@
   "SIEMENS|CHEST|B50f|1.5": 1200
  },
  "code": {
-  "git_commit": "09895cb9ce12e9efa7ab8861662a4808581aaa45",
-  "riqe_sha256": "a78200e7d83afd42aa00900f123ec959e09fa179a26ad685420ffd1ad9b5f9f3"
+  "git_commit": "8ec086263fdfa0aa64738476d361686cb242bfbc",
+  "riqe_sha256": "2dc9bea003d577e7995b47f432945ce94b679e2a5f5f742dc7ac94b816d402ab"
  },
  "slices": [
   {

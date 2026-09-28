@@ -1,8 +1,8 @@
-"""Pipeline completa: HU -> luminanza -> maschere -> 36 feature per patch.
+"""Full pipeline: HU -> luminance -> masks -> 36 features per patch.
 
-Un unico punto di ingresso, cosi' che fitting e valutazione non possano
-divergere per sbaglio: l'unica differenza ammessa fra i due e' il parametro
-`p`, che in valutazione deve essere None come prescrive l'articolo NIQE.
+A single entry point, so that fitting and scoring cannot diverge by accident:
+the only admissible difference between the two is the parameter `p`, which
+must be None at scoring time as the NIQE paper prescribes.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from .nss import GAUSS_SIGMA, N_FEATURES, patch_features
 
 @dataclass(frozen=True)
 class Spec:
-    """Specifica completa del modello: tutto cio' che cambia i numeri."""
+    """Complete model specification: everything that changes the numbers."""
 
     hu_lo: float = HU_LO
     hu_hi: float = HU_HI
@@ -44,8 +44,8 @@ class Spec:
         }
 
     def key(self) -> tuple:
-        """Chiave delle sole componenti che cambiano le feature per patch
-        (la soglia p agisce solo sulla selezione, a valle)."""
+        """Key of the components that change per-patch features (the
+        threshold p acts only on selection, downstream)."""
         return (self.hu_lo, self.hu_hi, self.code_max, self.C, self.P,
                 self.gauss_sigma, self.body_min, self.use_masks)
 
@@ -64,19 +64,19 @@ def features_from_hu(
     fitting: bool,
     masks: tuple[np.ndarray, np.ndarray] | None = None,
 ):
-    """Feature di una slice.
+    """Features of one slice.
 
-    Parametri
-    ---------
-    fitting : True per il fitting del corpus (applica la selezione per
-              nitidezza), False per il punteggio (non la applica).
-    masks   : (fov, body) precalcolate.  Vanno passate quando si valutano
-              versioni degradate della stessa slice: la maschera deve
-              restare quella dell'originale, altrimenti una degradazione che
-              sposta la soglia del corpo cambia anche il dominio e si
-              confonde l'effetto della degradazione con quello del dominio.
+    Parameters
+    ----------
+    fitting : True for fitting the corpus (applies sharpness selection),
+              False for scoring (does not).
+    masks   : precomputed (fov, body). Pass them when scoring degraded
+              versions of the same slice: the mask must remain that of the
+              original, otherwise a degradation that moves the body threshold
+              also changes the domain, confounding the effect of the
+              degradation with that of the domain.
 
-    Ritorna un PatchFeatures; `.selected` sono le patch da usare.
+    Returns a PatchFeatures; `.selected` are the patches to use.
     """
     if spec.use_masks:
         if masks is None:
@@ -102,6 +102,6 @@ def masks_for(hu: np.ndarray, padding_value: float | None):
     return fov, body
 
 
-#: numero minimo di patch per stimare una covarianza 36x36 non degenere.
-#: Con meno di questo il punteggio non e' definibile e va riportato NaN.
+#: minimum number of patches to estimate a non-degenerate 36x36 covariance.
+#: Below this the score is undefined and must be reported as NaN.
 MIN_PATCHES_FOR_SCORE = 2 * N_FEATURES

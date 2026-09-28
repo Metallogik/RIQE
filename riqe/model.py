@@ -1,17 +1,16 @@
-"""Modello MVG, punteggio e divergenza fra modelli.
+"""MVG model, score, and divergence between models.
 
-Punteggio, formula (10) dell'articolo NIQE:
+Score, equation (10) of the NIQE paper:
 
     D = sqrt( (nu1 - nu2)^T ((Sigma1 + Sigma2)/2)^-1 (nu1 - nu2) )
 
-La stessa forma funzionale serve da metrica di divergenza fra due modelli
-(cfr. docs/01-proposta.md 5.2): la divergenza si legge cosi' nelle stesse
-unita' dei punteggi che il modello produce.
+The same functional form is used as the divergence between two models, so
+that a divergence reads in the same units as the scores the model produces.
 
-L'inversa e' sempre una pseudo-inversa per SVD con soglia relativa
-dichiarata: con P piccolo o con poche patch la covarianza mediata puo'
-essere mal condizionata, e un ridge implicito nascosto renderebbe i numeri
-non riproducibili.
+The inverse is always an SVD pseudo-inverse with a declared relative
+tolerance: with small P or few patches the averaged covariance can be
+ill-conditioned, and a hidden implicit ridge would make the numbers
+irreproducible.
 """
 
 from __future__ import annotations
@@ -22,13 +21,13 @@ from typing import Any
 
 import numpy as np
 
-#: soglia relativa dei valori singolari per la pseudo-inversa
+#: relative singular-value tolerance of the pseudo-inverse
 RCOND = 1e-10
 
 
 @dataclass
 class MVGModel:
-    """Modello gaussiano multivariato a 36 dimensioni."""
+    """36-dimensional multivariate Gaussian model."""
 
     nu: np.ndarray            # (36,)
     sigma: np.ndarray         # (36, 36)
@@ -74,13 +73,13 @@ def fit_mvg(
     n_patients: int = 0,
     meta: dict[str, Any] | None = None,
 ) -> MVGModel:
-    """Fit di media e covarianza su un insieme di patch (n_patch, 36)."""
+    """Fit mean and covariance on a set of patches (n_patch, 36)."""
     f = np.asarray(features, dtype=np.float64)
     if f.ndim != 2:
-        raise ValueError("features deve essere (n_patch, n_feature)")
+        raise ValueError("features must be (n_patch, n_feature)")
     if f.shape[0] <= f.shape[1]:
         raise ValueError(
-            f"servono piu' patch che feature: {f.shape[0]} patch, {f.shape[1]} feature"
+            f"more patches than features are needed: {f.shape[0]} patches, {f.shape[1]} features"
         )
     return MVGModel(
         nu=f.mean(axis=0),
@@ -95,7 +94,7 @@ def fit_mvg(
 def mahalanobis_mixed(
     nu1: np.ndarray, sigma1: np.ndarray, nu2: np.ndarray, sigma2: np.ndarray, rcond: float = RCOND
 ) -> float:
-    """Formula (10): distanza con covarianza mediata."""
+    """Equation (10): distance with averaged covariance."""
     d = np.asarray(nu1, dtype=np.float64) - np.asarray(nu2, dtype=np.float64)
     s = (np.asarray(sigma1, dtype=np.float64) + np.asarray(sigma2, dtype=np.float64)) / 2.0
     val = float(d @ np.linalg.pinv(s, rcond=rcond) @ d)
@@ -103,7 +102,7 @@ def mahalanobis_mixed(
 
 
 def score(model: MVGModel, features: np.ndarray, rcond: float = RCOND) -> float:
-    """Punteggio RIQE di un'immagine dalle sue patch (senza selezione)."""
+    """RIQE score of an image from its patches (without selection)."""
     f = np.asarray(features, dtype=np.float64)
     if f.shape[0] <= 1:
         return float("nan")
@@ -111,12 +110,12 @@ def score(model: MVGModel, features: np.ndarray, rcond: float = RCOND) -> float:
 
 
 def model_divergence(a: MVGModel, b: MVGModel, rcond: float = RCOND) -> float:
-    """Divergenza primaria fra due modelli: la stessa D del punteggio."""
+    """Primary divergence between two models: the same D as the score."""
     return mahalanobis_mixed(a.nu, a.sigma, b.nu, b.sigma, rcond)
 
 
 def symmetric_kl(a: MVGModel, b: MVGModel, rcond: float = RCOND) -> float:
-    """Divergenza KL simmetrizzata (Jeffreys) fra le due gaussiane."""
+    """Symmetrised (Jeffreys) KL divergence between the two Gaussians."""
     d = a.dim
     sa, sb = np.asarray(a.sigma), np.asarray(b.sigma)
     ia, ib = np.linalg.pinv(sa, rcond=rcond), np.linalg.pinv(sb, rcond=rcond)
@@ -132,10 +131,10 @@ def _logdet(s: np.ndarray) -> float:
 
 
 def feature_shift(a: MVGModel, b: MVGModel) -> np.ndarray:
-    """Scostamento standardizzato per feature, (nu_a - nu_b) / sd mediata.
+    """Standardised per-feature shift, (nu_a - nu_b) / averaged sd.
 
-    Dice *quali* delle 36 componenti si muovono fra due modelli, che la D
-    aggregata nasconde.
+    Tells *which* of the 36 components move between two models, which the
+    aggregate D hides.
     """
     sd = np.sqrt((np.diag(a.sigma) + np.diag(b.sigma)) / 2.0)
     with np.errstate(divide="ignore", invalid="ignore"):

@@ -1,19 +1,18 @@
-"""Banco di immagini di prova, definito in modo deterministico.
+"""Bank of test images, defined deterministically.
 
-Una voce del banco descrive una trasformazione di una slice sorgente in modo
-completamente riproducibile: tipo, parametri, seme del generatore, forza
-calibrata del filtro.  L'immagine non viene salvata: viene **rigenerata** da
-`render`, identica bit per bit, ogni volta che serve.
+A bank entry describes a transformation of a source slice in a fully
+reproducible way: kind, parameters, random seed, calibrated filter strength.
+The image is not stored: it is **regenerated** by `render`, bit for bit,
+whenever needed.
 
-Motivo: la ricerca degli iperparametri deve valutare lo stesso insieme di
-immagini sotto 12 combinazioni (P, C) diverse, e la batteria di validazione
-deve valutarlo ancora.  Salvare le immagini costerebbe decine di GB;
-salvarne la ricetta costa kilobyte, e rende la riproduzione da parte di terzi
-un fatto verificabile invece di una promessa.
+Rationale: the hyperparameter search scores the same set of images under many
+(P, C) settings, and the validation battery scores it again. Storing the
+images would cost tens of GB; storing their recipes costs kilobytes, and
+makes reproduction by third parties a checkable fact rather than a promise.
 
-La calibrazione della forza dei filtri e' la parte costosa (bisezione con
-molte applicazioni del filtro) e **non dipende da (P, C)**: si fa una volta,
-si registra nel banco, e non si rifa'.
+Calibrating filter strengths is the expensive part (bisection with many
+filter applications) and **does not depend on (P, C)**: it is done once,
+recorded in the bank, and never repeated.
 """
 
 from __future__ import annotations
@@ -28,10 +27,10 @@ from . import degrade as dg
 
 @dataclass(frozen=True)
 class BankEntry:
-    """Ricetta di una singola immagine di prova."""
+    """Recipe of one test image."""
 
-    kind: str                     # original | noise_white | noise_fbp | blur | denoise
-    source: str = "full"          # full | low  (quale slice del paziente)
+    kind: str                     # original | noise_white | noise_fbp | noise_rel | blur | denoise
+    source: str = "full"          # full | low  (which slice of the patient)
     sigma_hu: float | None = None
     sigma_px: float | None = None
     seed: int | None = None
@@ -58,7 +57,7 @@ class BankEntry:
 
 
 def render(entry: BankEntry, hu: np.ndarray) -> np.ndarray:
-    """Rigenera l'immagine della voce dalla slice sorgente in HU."""
+    """Regenerate the image of an entry from the source slice in HU."""
     if entry.kind == "original":
         return hu.astype(np.float32, copy=True)
     if entry.kind == "noise_white":
@@ -69,17 +68,17 @@ def render(entry: BankEntry, hu: np.ndarray) -> np.ndarray:
         return dg.blur(hu, entry.sigma_px)
     if entry.kind == "denoise":
         if entry.strength is None:
-            raise ValueError("voce denoise senza forza calibrata")
+            raise ValueError("denoise entry without a calibrated strength")
         return dg.apply_denoiser(hu, entry.denoiser, entry.strength)
-    raise ValueError(f"tipo di voce sconosciuto: {entry.kind}")
+    raise ValueError(f"unknown entry kind: {entry.kind}")
 
 
 _K_FBP: float | None = None
 
 
 def _fbp_local_ratio() -> float:
-    """Rapporto fra sigma locale mediana e sigma globale del rumore FBP
-    sintetico, stimato una volta su realizzazioni a seme fisso."""
+    """Ratio between the median local sigma and the global sigma of the
+    synthetic FBP-like noise, estimated once on fixed-seed realisations."""
     global _K_FBP
     if _K_FBP is None:
         from .nss import local_stats
@@ -105,10 +104,10 @@ def build_bank(
     noise_fine=(),
     noise_rel=(),
 ) -> list[BankEntry]:
-    """Costruisce il banco per una slice, calibrando le forze dei filtri.
+    """Build the bank of one slice, calibrating the filter strengths.
 
-    E' la funzione costosa: va chiamata una volta per slice, e il risultato
-    va serializzato.
+    This is the expensive function: call it once per slice and serialise the
+    result.
     """
     entries: list[BankEntry] = [BankEntry(kind="original", source=source)]
     for i, s in enumerate(noise_sigmas):
@@ -122,20 +121,20 @@ def build_bank(
                 BankEntry(kind="noise_fbp", source=source, sigma_hu=float(s), seed=seed + 2000 + i)
             )
     if noise_rel:
-        # Scala di rumore RELATIVA al rumore nativo della slice.  La scala in
-        # HU assoluti confonde i protocolli: 5 HU su un torace con 60 HU di
-        # rumore nativo sono meno dell'1% di aumento, fisicamente non
-        # rilevabili (docs/05 §8.1).  Qui l'aumento r del rumore totale e'
-        # lo stesso per ogni slice: sigma_agg = sigma_nat * sqrt((1+r)^2 - 1).
+        # Noise ladder RELATIVE to the native noise of the slice. A ladder in
+        # absolute HU confounds protocols: 5 HU on a chest slice with 60 HU of
+        # native noise is less than a 1% increase, physically undetectable.
+        # Here the increase r of the total noise is the same for every slice:
+        # sigma_added = sigma_native * sqrt((1 + r)^2 - 1).
         from .nss import local_stats
 
         _, sig = local_stats(hu)
         sigma_nat = float(np.median(sig[body])) if body.any() else float("nan")
-        # sigma_nat e' misurata con lo stimatore locale (finestra 7x7), che
-        # di un rumore correlato vede solo una parte: per il rumore tipo FBP
-        # sintetico, sigma locale = 0,637 sigma globale (misurato, stabile a
-        # +-0,002).  Il rumore da aggiungere va quindi espresso nelle stesse
-        # unita' della misura, altrimenti un +100% richiesto diventa +55%.
+        # sigma_nat is measured by the local estimator (7x7 window), which
+        # sees only part of a correlated noise: for the synthetic FBP-like
+        # noise, local sigma = 0.637 x global sigma (measured, stable to
+        # +-0.002). The added noise must be expressed in the same units as the
+        # measurement, otherwise a requested +100% becomes +55%.
         k = _fbp_local_ratio()
         for i, r in enumerate(noise_rel):
             s_add = sigma_nat * float(np.sqrt((1.0 + r) ** 2 - 1.0)) / k

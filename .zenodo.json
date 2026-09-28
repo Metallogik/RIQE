@@ -1,5 +1,5 @@
 {
-  "title": "RIQE: a modality-specific no-reference quality model for CT, with validation",
+  "title": "RIQE: a NIQE-style reference model for CT",
   "description": "<p>A NIQE-style no-reference image quality model fitted on computed tomography instead of natural photographs, together with the validation that the existing literature omits.</p><p>The artefact carries the intensity mapping that <em>defines</em> the model (a fixed Hounsfield window, declared as part of the specification), the hyperparameters and the criterion that selected them, the identity of every slice used with its SHA-256, and the identity of the code that produced it. A verification script refits from the same public data and compares, so reproducibility is checkable rather than asserted.</p><p>The score is a distance from the declared model, never an absolute judgement of diagnostic quality, and is not comparable with NIQE values in the literature. The model does not know what a lesion is.</p><p>Fitted on the CC BY 4.0 Chest and Liver subsets of the TCIA collection LDCT-and-Projection-data (DOI 10.7937/9npb-2637, version 7). Algorithm implemented from Mittal, Soundararajan and Bovik, IEEE SPL 20(3):209-212, 2013; no third-party code incorporated.</p>",
   "upload_type": "software",
   "license": "cc-by-4.0",

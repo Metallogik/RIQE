@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Calcola i momenti MVG (nu, Sigma) di ogni immagine del banco, per ogni
-combinazione (P, C).
+"""Compute the MVG moments (nu, Sigma) of every bank image, for every (P, C)
+setting.
 
-Perche' i momenti e non il punteggio: il punteggio dipende anche dal modello,
-che dipende dalla soglia `p`.  Salvando (nu_2, Sigma_2) per immagine il
-punteggio sotto qualunque modello diventa un prodotto matriciale, e la
-spazzata su `p` costa zero.  Sono 36 + 36x36 numeri per immagine: 5 kB,
-contro 1 MB per l'immagine.
+Why moments and not scores: the score also depends on the model, which
+depends on the threshold `p`. Storing (nu_2, Sigma_2) per image turns the
+score under any model into a matrix product, and the sweep over `p` costs
+nothing. That is 36 + 36x36 numbers per image: 5 kB, against 1 MB for the
+image.
 
-Struttura della passata: si itera **sulle slice**, non sulle configurazioni.
-Il costo dominante e' applicare i filtri per rigenerare le immagini, e quello
-non dipende da (P, C): si rigenera una volta e si estrae per tutte le
-configurazioni.
+Structure of the pass: iterate **over slices**, not over settings. The
+dominant cost is applying filters to regenerate the images, and that does not
+depend on (P, C): each image is regenerated once and its features extracted
+for every setting.
 
     .venv/bin/python scripts/score_bank.py --bank experiments/bank_val_inner.json
 """
@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import os
 
-# Un thread per processo: il parallelismo lo diamo con i processi, e lasciare
-# che ogni worker apra i propri thread BLAS porta a oversubscription (load 90
-# su 32 core, misurato) invece che a velocita'. Va fatto prima di numpy.
+# One thread per process: parallelism comes from processes, and letting every
+# worker open its own BLAS threads causes oversubscription (load 90 on 32
+# cores, measured) instead of speed. Must be set before importing numpy.
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_v, "1")
@@ -90,9 +90,9 @@ def _one(rec: dict):
                     "P": P,
                     "C": C,
                     "n_patches": n,
-                    # array numpy, non liste Python: una lista di 1296 float
-                    # costa ~30 byte per elemento, e con 288.000 righe sul
-                    # banco TEST sarebbero oltre 10 GB nel processo padre
+                    # numpy arrays, not Python lists: a list of 1296 floats costs
+                    # ~30 bytes per element, and with 288,000 rows on the test
+                    # bank that would be over 10 GB in the parent process
                     "nu": None if nu is None else nu.astype(np.float32),
                     "sigma": None if sg is None else sg.astype(np.float32),
                 })
@@ -111,8 +111,8 @@ def main() -> int:
 
     bank = json.load(open(args.bank))
     configs = [(int(P), float(C)) for P in args.P.split(",") for C in args.C.split(",")]
-    print(f"banco: {bank['n_slices']} slice, {bank['n_entries']} immagini; "
-          f"{len(configs)} configurazioni (P, C)")
+    print(f"bank: {bank['n_slices']} slices, {bank['n_entries']} images; "
+          f"{len(configs)} (P, C) settings")
 
     t0 = time.time()
     recs = []
@@ -121,10 +121,10 @@ def main() -> int:
             recs.append(r)
             if i % 10 == 0:
                 done = sum(len(x["rows"]) for x in recs)
-                print(f"  {i}/{bank['n_slices']} slice, {done} righe, "
+                print(f"  {i}/{bank['n_slices']} slices, {done} rows, "
                       f"{(time.time()-t0)/60:.1f} min", flush=True)
 
-    # serializzazione compatta: array numpy invece di JSON per i momenti
+    # compact serialisation: numpy arrays instead of JSON for the moments
     rows = [r2 for r in recs for r2 in r["rows"]]
     meta_keys = ["source", "label", "kind", "denoiser", "target_residual_hu",
                  "residual_hu", "sigma_hu", "sigma_px", "rel_increase", "P", "C", "n_patches"]
@@ -151,8 +151,8 @@ def main() -> int:
         configs=json.dumps(configs),
     )
     n_bad = int(np.isnan(NU[:, 0]).sum())
-    print(f"scritto {out}: {len(rows)} righe, {n_bad} senza punteggio definibile "
-          f"(< {MIN_PATCHES_FOR_SCORE} patch), {(time.time()-t0)/60:.1f} min")
+    print(f"wrote {out}: {len(rows)} rows, {n_bad} without a defined score "
+          f"(< {MIN_PATCHES_FOR_SCORE} patches), {(time.time()-t0)/60:.1f} min")
     return 0
 
 

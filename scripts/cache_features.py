@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
-"""Estrae e mette in cache le feature per patch di tutte le slice del corpus.
+"""Extract and cache the per-patch features of every slice of the corpus.
 
-Una cache per combinazione (P, C): sono le sole componenti che cambiano le
-feature per patch.  La soglia di nitidezza `p` agisce **a valle**, sulla
-selezione, quindi si puo' spazzare gratis a partire da `delta` salvata.
+One cache per (P, C) setting: these are the only components that change the
+per-patch features. The sharpness threshold `p` acts **downstream**, on
+selection, so it can be swept for free from the stored `delta`.
 
-Vengono salvate solo le patch nel dominio (FOV al 100%, corpo alla frazione
-dichiarata): le altre non sono usabili ne' in fitting ne' in punteggio.
+Only patches inside the domain are stored (field of view at 100%, body at the
+declared fraction): the others are usable neither for fitting nor for
+scoring.
 
     .venv/bin/python scripts/cache_features.py [--workers 24] \
-        [--P 16,24,32] [--C 1.0,0.5,0.25,0.1] [--kind full,low]
+        [--P 16,24,32] [--C 1,0.5,0.25,0.1,0.05,0.025,0.01] [--kind full,low]
 """
 
 from __future__ import annotations
 
 import os
 
-# Un thread per processo: il parallelismo lo diamo con i processi, e lasciare
-# che ogni worker apra i propri thread BLAS porta a oversubscription (load 90
-# su 32 core, misurato) invece che a velocita'. Va fatto prima di numpy.
+# One thread per process: parallelism comes from processes, and letting every
+# worker open its own BLAS threads causes oversubscription (load 90 on 32
+# cores, measured) instead of speed. Must be set before importing numpy.
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_v, "1")
@@ -68,7 +69,7 @@ def _one(path: str):
 
 
 def build(P: int, C: float, paths: list[str], workers: int) -> dict:
-    spec = Spec(P=P, C=C, p=None)  # p=None: selezione applicata a valle
+    spec = Spec(P=P, C=C, p=None)  # p=None: selection applied downstream
     out = CACHE / cache_name(P, C)
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -103,7 +104,7 @@ def build(P: int, C: float, paths: list[str], workers: int) -> dict:
         "minutes": (time.time() - t0) / 60,
     }
     (out / "info.json").write_text(json.dumps(info, indent=1))
-    print(f"  {cache_name(P,C)}: {info['n_patches']} patch, "
+    print(f"  {cache_name(P,C)}: {info['n_patches']} patches, "
           f"{info['mean_patches_per_slice']:.0f}/slice, {info['bytes']/1e6:.0f} MB, "
           f"{info['minutes']:.1f} min", flush=True)
     return info
@@ -113,7 +114,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--workers", type=int, default=24)
     ap.add_argument("--P", default="16,24,32")
-    ap.add_argument("--C", default="1.0,0.5,0.25,0.1")
+    ap.add_argument("--C", default="1.0,0.5,0.25,0.1,0.05,0.025,0.01")
     ap.add_argument("--kind", default="full,low")
     args = ap.parse_args()
 
@@ -121,8 +122,8 @@ def main() -> int:
     kinds = args.kind.split(",")
     sel = corpus[(corpus["kind"].isin(kinds)) & (corpus["keep"])]
     paths = [str(ROOT / p) for p in sel["path"]]
-    print(f"slice da estrarre: {len(paths)}  "
-          f"(pazienti {sel.patient_id.nunique()}, celle {sel.cell.nunique()})")
+    print(f"slices to extract: {len(paths)}  "
+          f"(patients {sel.patient_id.nunique()}, protocol cells {sel.cell.nunique()})")
 
     infos = []
     for P in [int(x) for x in args.P.split(",")]:

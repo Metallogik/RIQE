@@ -1,17 +1,17 @@
-Il modello RIQE (vettore medio, covarianza, manifest del corpus, iperparametri)
-e i risultati sperimentali sono rilasciati sotto
+The RIQE model (mean vector, covariance, corpus manifests, hyperparameters)
+and the experimental results are released under
 
     Creative Commons Attribution 4.0 International (CC BY 4.0)
     https://creativecommons.org/licenses/by/4.0/
 
 Copyright (c) 2026 Metallogik
 
-Uso commerciale e opere derivate sono permessi, con obbligo di attribuzione.
+Commercial use and derivative works are permitted, with attribution.
 
-ATTRIBUZIONI EREDITATE, DA RIPORTARE IN OGNI USO DEL MODELLO
+INHERITED ATTRIBUTIONS, TO BE REPRODUCED IN EVERY USE OF THE MODEL
 
-Il modello e' fittato su dati pubblici di The Cancer Imaging Archive,
-distribuiti anch'essi sotto CC BY 4.0.  Chi usa il modello deve citare:
+The model is fitted on public data from The Cancer Imaging Archive, also
+distributed under CC BY 4.0. Anyone using the model must cite:
 
   McCollough, C., Chen, B., Holmes III, D., Duan, X., Yu, Z., Yu, L.,
   Leng, S., Fletcher, J. (2020). Low Dose CT Image and Projection Data
@@ -22,11 +22,11 @@ distribuiti anch'essi sotto CC BY 4.0.  Chi usa il modello deve citare:
   (TCIA): Maintaining and Operating a Public Information Repository.
   Journal of Digital Imaging, 26(6), 1045-1057.
 
-e riconoscere i finanziamenti NIBIB EB017095 ed EB017185
+and acknowledge NIBIB grants EB017095 and EB017185
 (PI: Cynthia McCollough).
 
-L'algoritmo e' implementato dall'articolo seguente, che va citato come fonte
-dell'algoritmo (nessun codice di terzi e' incorporato):
+The algorithm is implemented from the following paper, which must be cited
+as the source of the algorithm (no third-party code is incorporated):
 
   Mittal, A., Soundararajan, R., Bovik, A. C. (2013). Making a "Completely
   Blind" Image Quality Analyzer. IEEE Signal Processing Letters, 20(3),

@@ -1,8 +1,8 @@
-"""Accesso alla cache delle feature, con fitting a soglia `p` variabile.
+"""Access to the feature cache, with fitting at a variable threshold `p`.
 
-La cache contiene solo le patch nel dominio, con la loro nitidezza `delta`.
-La selezione per nitidezza (soglia relativa al massimo **per immagine**) si
-applica qui, a valle: cambiare `p` non richiede di riestrarre nulla.
+The cache holds only the patches inside the domain, with their sharpness
+`delta`. Sharpness selection (threshold relative to the maximum **per
+image**) is applied here, downstream: changing `p` needs no re-extraction.
 """
 
 from __future__ import annotations
@@ -15,16 +15,16 @@ import numpy as np
 from .model import MVGModel, fit_mvg
 
 
-#: radice del progetto, per normalizzare i percorsi
+#: project root, to normalise paths
 _ROOT = Path(__file__).resolve().parents[1]
 
 
 def canonical(path: str | Path) -> str:
-    """Percorso in forma canonica, relativa alla radice del progetto.
+    """Canonical path, relative to the project root.
 
-    La cache e' stata scritta con percorsi assoluti, le tabelle del corpus
-    usano percorsi relativi.  Senza normalizzazione la ricerca fallisce in
-    silenzio e il fit si ritrova con meno slice del previsto, o con nessuna.
+    Caches may have been written with absolute paths while the corpus tables
+    use relative ones. Without normalisation the lookup fails silently and a
+    fit ends up with fewer slices than intended, or none.
     """
     q = Path(path)
     if q.is_absolute():
@@ -60,24 +60,24 @@ class FeatureCache:
         return np.asarray(self.features[s : s + n]), np.asarray(self.delta[s : s + n])
 
     def select(self, path: str, p: float | None) -> np.ndarray:
-        """Patch selezionate di una slice alla soglia `p`."""
+        """Selected patches of one slice at threshold `p`."""
         f, d = self.slice_rows(path)
         if p is None or f.shape[0] == 0:
             return f
         return f[d > p * d.max()]
 
-    # -- statistiche sufficienti ------------------------------------------
+    # -- sufficient statistics ------------------------------------------------
     #
-    # Media e covarianza di un gruppo di slice dipendono solo da tre
-    # quantita' per slice: il numero di patch, la somma dei vettori e la
-    # somma dei prodotti esterni.  Precalcolarle rende ogni rifit una
-    # aggregazione di 36 + 1296 numeri per slice invece di una rilettura e
-    # concatenazione di centinaia di migliaia di patch.  Serve perche' la
-    # ricerca degli iperparametri rifitta 96 volte per 60 bootstrap, e la
-    # stratificazione 200 volte per contrasto: senza, sono ore.
+    # Mean and covariance of a group of slices depend only on three per-slice
+    # quantities: number of patches, sum of vectors, sum of outer products.
+    # Precomputing them turns every refit into an aggregation of 36 + 1296
+    # numbers per slice instead of re-reading and concatenating hundreds of
+    # thousands of patches. Needed because the hyperparameter search refits
+    # 168 settings times 60 bootstraps, and stratification 200 times per
+    # contrast: without it, hours.
 
     def stats(self, p: float | None) -> dict[str, tuple[int, np.ndarray, np.ndarray]]:
-        """(n, somma, somma dei prodotti esterni) per slice, alla soglia `p`."""
+        """(n, sum, sum of outer products) per slice, at threshold `p`."""
         key = ("all" if p is None else round(float(p), 6))
         if key not in self._stats:
             out = {}
@@ -92,11 +92,11 @@ class FeatureCache:
 
     def fit_fast(self, paths, p: float | None, n_patients: int = 0,
                  meta: dict | None = None) -> MVGModel:
-        """Come `fit`, ma dalle statistiche sufficienti.
+        """Like `fit`, but from sufficient statistics.
 
-        Risultato identico a `fit` entro l'errore di arrotondamento: la
-        covarianza e' calcolata come (S2 - N mu mu^T) / (N - 1), la stessa
-        stima non distorta di np.cov con ddof=1.
+        Identical to `fit` within rounding error: the covariance is computed
+        as (S2 - N mu mu^T) / (N - 1), the same unbiased estimate as np.cov
+        with ddof=1.
         """
         st = self.stats(p)
         n = 0
@@ -113,7 +113,7 @@ class FeatureCache:
             n_img += 1
         if n <= self.n_features:
             raise ValueError(
-                f"solo {n} patch per {self.n_features} feature: soglia p troppo alta?")
+                f"only {n} patches for {self.n_features} features: threshold p too high?")
         mu = s1 / n
         cov = (s2 - n * np.outer(mu, mu)) / (n - 1)
         m = dict(meta or {})
@@ -127,20 +127,20 @@ class FeatureCache:
         return int(self.features.shape[1])
 
     def fit(self, paths, p: float | None, n_patients: int = 0, meta: dict | None = None) -> MVGModel:
-        """Fit del modello sulle slice indicate, alla soglia `p`."""
+        """Fit the model on the given slices, at threshold `p`."""
         paths = [canonical(q) for q in paths]
         known = [q for q in paths if q in self.by_path]
         if len(known) < len(paths):
             raise KeyError(
-                f"{len(paths) - len(known)} delle {len(paths)} slice richieste non "
-                f"sono nella cache {self.dir.name}. Rieseguire cache_features.py, "
-                f"oppure i percorsi non corrispondono (esempio mancante: "
+                f"{len(paths) - len(known)} of the {len(paths)} requested slices are "
+                f"not in cache {self.dir.name}. Re-run cache_features.py, or the "
+                f"paths do not match (missing example: "
                 f"{next(q for q in paths if q not in self.by_path)})"
             )
         parts = [self.select(pp, p) for pp in known]
         parts = [x for x in parts if x.shape[0] > 0]
         if not parts:
-            raise ValueError("nessuna patch selezionata: soglia p troppo alta?")
+            raise ValueError("no patch selected: threshold p too high?")
         X = np.concatenate(parts).astype(np.float64)
         m = dict(meta or {})
         m.update({"P": self.P, "C": self.C, "p": p,

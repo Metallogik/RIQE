@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Fit del modello generico e scrittura dell'artefatto.
+"""Fit the generic model and write the artifact.
 
-L'artefatto non e' il file dei numeri: e' il file dei numeri **piu' tutto cio'
-che serve a rifarli**.  E' il difetto preciso del lavoro esistente, che
-pubblica un risultato e non i mezzi per riprodurlo.  Qui dentro finiscono:
+The artifact is not the file of numbers: it is the file of numbers **plus
+everything needed to redo them**. That is the precise defect of existing work,
+which publishes a result and not the means to reproduce it. It contains:
 
-  * nu, Sigma e la pseudo-inversa precalcolata con la soglia usata;
-  * la mappatura di intensita' completa (finestra HU, scala, C, kernel,
-    regole di maschera), che *definisce* il modello;
-  * gli iperparametri e il criterio che li ha scelti;
-  * l'identita' del corpus: collezione, DOI, versione, ogni PatientID,
-    SeriesInstanceUID e SOPInstanceUID usato, con lo SHA-256 di ogni slice,
-    e i conteggi di esclusione per criterio;
-  * l'identita' del codice: commit git, SHA-256 del sorgente, versioni delle
-    librerie, semi dei generatori;
-  * licenza e attribuzioni dovute.
+  * nu, Sigma and the precomputed pseudo-inverse with the threshold used;
+  * the complete intensity mapping (HU window, scale, C, kernel, mask rules),
+    which *defines* the model;
+  * the hyperparameters and the criterion that chose them;
+  * the identity of the corpus: collection, DOI, version, every PatientID,
+    SeriesInstanceUID and SOPInstanceUID used, with the SHA-256 of every
+    slice, and the exclusion counts per criterion;
+  * the identity of the code: git commit, SHA-256 of the source, library
+    versions, generator seeds;
+  * licence and required attributions.
 
     .venv/bin/python scripts/fit_model.py --P 16 --C 0.25 --p 0.2
 """
@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import os
 
-# Un thread per processo: il parallelismo lo diamo con i processi, e lasciare
-# che ogni worker apra i propri thread BLAS porta a oversubscription (load 90
-# su 32 core, misurato) invece che a velocita'. Va fatto prima di numpy.
+# One thread per process: parallelism comes from processes, and letting every
+# worker open its own BLAS threads causes oversubscription (load 90 on 32
+# cores, measured) instead of speed. Must be set before importing numpy.
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_v, "1")
@@ -74,13 +74,12 @@ def code_hash() -> dict:
 
 
 def slice_hashes() -> dict[str, str]:
-    """percorso relativo della slice -> SHA-256, dai manifest di scaricamento.
+    """Relative slice path -> SHA-256, from the download manifests.
 
-    L'aggancio e' per percorso, non per SOPInstanceUID: i manifest di
-    scaricamento indicizzano per nome di file dentro la serie, e il nome di
-    file non e' il SOP UID.  Chi tentasse l'aggancio diretto otterrebbe zero
-    corrispondenze, cioe' un artefatto che *dichiara* di portare gli hash
-    senza portarne nessuno.
+    The link is by path, not by SOPInstanceUID: the download manifests index
+    by file name within the series, and the file name is not the SOP UID.
+    Linking directly would give zero matches, i.e. an artifact that *claims*
+    to carry the hashes without carrying any.
     """
     out = {}
     for m in sorted((ROOT / "data" / "manifest").glob("*.json")):
@@ -104,7 +103,7 @@ def main() -> int:
     if args.P is None:
         args.P, args.C, args.p = choice.get("P"), choice.get("C"), choice.get("p")
     if args.P is None:
-        ap.error("servono --P --C --p, oppure experiments/hparam_choice.json")
+        ap.error("need --P --C --p, or experiments/hparam_choice.json")
 
     spec = Spec(P=args.P, C=args.C, p=args.p)
     corpus = pd.read_parquet(ROOT / "corpus" / "corpus.parquet")
@@ -115,10 +114,10 @@ def main() -> int:
     fit_slices = corpus[(corpus["kind"] == "full") & corpus["keep"] & corpus.patient_id.isin(fit_pids)]
     cache = FeatureCache(ROOT / "data" / "features" / f"P{args.P}_C{args.C:g}")
 
-    print(f"fit: {len(fit_slices)} slice, {fit_slices.patient_id.nunique()} pazienti, "
+    print(f"fit: {len(fit_slices)} slices, {fit_slices.patient_id.nunique()} patients, "
           f"P={args.P} C={args.C:g} p={args.p:g}")
     model = cache.fit(list(fit_slices["path"]), args.p, n_patients=fit_slices.patient_id.nunique())
-    print(f"patch selezionate: {model.n_patches} ({model.meta['patches_per_slice']:.1f}/slice)")
+    print(f"selected patches: {model.n_patches} ({model.meta['patches_per_slice']:.1f}/slice)")
     print(f"cond(Sigma) = {model.cond():.3e}")
 
     pinv = np.linalg.pinv(model.sigma, rcond=RCOND)
@@ -133,9 +132,9 @@ def main() -> int:
     missing = sum(1 for s in used if not s["sha256"])
     if missing:
         raise SystemExit(
-            f"ERRORE: {missing} slice su {len(used)} senza SHA-256. L'artefatto "
-            f"non viene scritto: un modello che dichiara l'identita' del corpus "
-            f"senza portarla e' esattamente il difetto che questo lavoro colma."
+            f"ERROR: {missing} of {len(used)} slices without SHA-256. The artifact "
+            f"is not written: a model that claims the identity of its corpus "
+            f"without carrying it is exactly the defect this work addresses."
         )
 
     out = ROOT / args.out
@@ -146,11 +145,10 @@ def main() -> int:
         "model_id": MODEL_ID,
         "created": date.today().isoformat(),
         "description": (
-            "Modello di riferimento no-reference in stile NIQE, fittato su TC a "
-            "dose piena. Il punteggio e' una distanza rispetto a questo modello, "
-            "non un giudizio assoluto di qualita' diagnostica: il modello non sa "
-            "cosa sia una lesione, e i valori non sono confrontabili con valori "
-            "NIQE della letteratura."
+            "NIQE-style no-reference reference model, fitted on full-dose CT. "
+            "The score is a distance from this model, not an absolute judgement "
+            "of diagnostic quality: the model does not know what a lesion is, "
+            "and its values are not comparable with NIQE values in the literature."
         ),
         "license": {
             "model": "CC BY 4.0",
@@ -160,51 +158,51 @@ def main() -> int:
             "inherited_acknowledgement": manifest["required_acknowledgement"],
             "algorithm_source": (
                 "Mittal A., Soundararajan R., Bovik A.C., Making a 'Completely Blind' "
-                "Image Quality Analyzer, IEEE SPL 20(3):209-212, 2013. Implementato "
-                "dall'articolo; nessun codice di terzi incorporato."
+                "Image Quality Analyzer, IEEE SPL 20(3):209-212, 2013. Implemented "
+                "from the paper; no third-party code incorporated."
             ),
         },
         "dimensions": len(FEATURE_NAMES),
         "feature_names": FEATURE_NAMES,
         "arrays": {
             "file": f"{MODEL_ID}.npz",
-            "nu": "vettore medio (36,)",
-            "sigma": "covarianza (36, 36)",
-            "pinv_sigma": f"pseudo-inversa di Sigma, rcond={RCOND:g}",
+            "nu": "mean vector (36,)",
+            "sigma": "covariance (36, 36)",
+            "pinv_sigma": f"pseudo-inverse of Sigma, rcond={RCOND:g}",
             "sha256": hashlib.sha256((out / f"{MODEL_ID}.npz").read_bytes()).hexdigest(),
         },
         "intensity_mapping": {
             **spec.as_dict(),
-            "formula": "L = 255 * (clip(HU, -1000, 1000) + 1000) / 2000, float32 non arrotondato",
+            "formula": "L = 255 * (clip(HU, -1000, 1000) + 1000) / 2000, float32, not rounded",
             "note": (
-                "La mappatura fa parte della specifica del modello: finestre "
-                "diverse producono modelli fra loro incompatibili."
+                "The mapping is part of the model specification: different "
+                "windows produce mutually incompatible models."
             ),
         },
         "masking": {
             "fov_required_fraction": 1.0,
-            "fov_rule": "pixel > PixelPaddingValue, e >= -1024 HU quando il tag manca",
+            "fov_rule": "pixel > PixelPaddingValue, and >= -1024 HU when the tag is missing",
             "body_min_fraction_per_patch": spec.body_min,
-            "body_rule": "HU > -300, apertura 5x5, componente connessa maggiore, riempimento buchi",
+            "body_rule": "HU > -300, 5x5 opening, largest connected component, holes filled",
             "why": (
-                "Le immagini GE di questa collezione portano 55.772 pixel per slice "
-                "(21,3%) a -3024 HU di riempimento fuori campo, le Siemens no. Senza "
-                "maschera FOV la differenza fra costruttori che si misurerebbe e' una "
-                "convenzione DICOM, non la fisica dell'acquisizione."
+                "GE images in this collection carry 55,772 pixels per slice (21.3%) "
+                "of -3024 HU padding outside the field of view; Siemens images do "
+                "not. Without a FOV mask the vendor difference one would measure is "
+                "a DICOM convention, not the physics of the acquisition."
             ),
         },
         "estimator": {
-            "gaussian_window": "7x7, sigma 1.0, volume unitario",
-            "ggd": "momenti (Sharifi & Leon-Garcia 1995)",
-            "aggd": "momenti (Lasmar, Stitou, Berthoumieu 2009)",
+            "gaussian_window": "7x7, sigma 1.0, unit volume",
+            "ggd": "moments (Sharifi & Leon-Garcia 1995)",
+            "aggd": "moments (Lasmar, Stitou, Berthoumieu 2009)",
             "alpha_inversion_grid": {"min": _ALPHA_MIN, "max": _ALPHA_MAX, "n": _ALPHA_N},
             "scales": 2,
-            "second_scale": "stesso kernel gaussiano, decimazione 2:1, patch P/2",
+            "second_scale": "same Gaussian kernel, 2:1 decimation, patch P/2",
             "score_formula": "sqrt((nu1-nu2)^T ((S1+S2)/2)^-1 (nu1-nu2)), pinv rcond=%g" % RCOND,
         },
         "hyperparameters": {
             "P": args.P, "C": args.C, "p": args.p,
-            "selection_criterion": choice.get("criterion", "non registrato"),
+            "selection_criterion": choice.get("criterion", "not recorded"),
             "declared_before_run": choice.get("declared_before_run"),
             "search_metrics": choice.get("metrics"),
         },
@@ -214,7 +212,7 @@ def main() -> int:
             "n_patients": model.n_patients,
             "patches_per_slice": model.meta["patches_per_slice"],
             "cond_sigma": model.cond(),
-            "split": "FIT (la partizione TEST non e' stata usata per il fitting)",
+            "split": "FIT (the TEST partition was not used for fitting)",
         },
         "corpus": {
             k: manifest[k] for k in (
@@ -236,12 +234,12 @@ def main() -> int:
         "reproduce": (
             "scripts/download_corpus.py -> scripts/build_slice_table.py -> "
             "scripts/make_corpus.py -> scripts/cache_features.py -> "
-            "scripts/fit_model.py ; poi scripts/verify_model.py per il confronto"
+            "scripts/fit_model.py ; then scripts/verify_model.py for the comparison"
         ),
     }
     (out / f"{MODEL_ID}.json").write_text(json.dumps(art, indent=1))
-    print(f"\nscritti {out}/{MODEL_ID}.npz e {MODEL_ID}.json "
-          f"({len(used)} slice registrate con SHA-256)")
+    print(f"\nwrote {out}/{MODEL_ID}.npz and {MODEL_ID}.json "
+          f"({len(used)} slices recorded with SHA-256)")
     return 0
 
 

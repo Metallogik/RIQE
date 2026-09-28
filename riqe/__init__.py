@@ -1,8 +1,8 @@
-"""RIQE - valutatore di qualita' no-reference per immagini TC.
+"""RIQE - a NIQE-style no-reference quality model for CT.
 
-Nota sul parallelismo.  Gli script di questo progetto usano un processo per
-slice.  Se ogni processo lascia che numpy/OpenBLAS apra i propri thread, su
-una macchina a 32 core si arriva a un load di 90 e il lavoro rallenta invece
-di accelerare: misurato.  Gli script impostano quindi le variabili
-d'ambiente a un thread per processo **prima** di importare numpy.
+Note on parallelism. The scripts of this project use one process per slice.
+If every process lets numpy/OpenBLAS open its own threads, a 32-core machine
+reaches a load of 90 and the work slows down instead of speeding up
+(measured). The scripts therefore set the environment to one thread per
+process **before** importing numpy.
 """

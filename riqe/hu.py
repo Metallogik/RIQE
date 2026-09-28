@@ -1,22 +1,22 @@
-"""Mappatura canonica HU -> luminanza e maschere di dominio.
+"""Canonical HU -> luminance mapping and domain masks.
 
-Questa mappatura e' parte inseparabile della specifica del modello: finestre
-diverse producono modelli fra loro incompatibili.  Cfr. docs/01-proposta.md 2.
+The mapping is an inseparable part of the model specification: different
+windows produce mutually incompatible models.
 
-Specifica congelata (RIQE v1):
+Frozen specification (RIQE v1):
 
     L = 255 * (clip(HU, HU_LO, HU_HI) - HU_LO) / (HU_HI - HU_LO)
 
-con HU_LO = -1000, HU_HI = +1000, in float32 e senza arrotondamento.  La
-scala 0-255 va conservata perche' la costante di stabilizzazione dell'MSCN e'
-additiva assoluta e presuppone quella scala; la quantizzazione a 8 bit no,
-non fa parte dell'algoritmo.
+with HU_LO = -1000 and HU_HI = +1000, in float32 and without rounding. The
+0-255 scale is kept because the MSCN stabilising constant is an absolute
+additive constant that presumes that scale; 8-bit quantisation is not part of
+the algorithm and is not applied.
 
-Le maschere non sono un accessorio.  Le immagini GE di questa collezione
-portano 55772 pixel per slice (21,3% dell'area) al valore di riempimento
--3024 HU fuori dal campo ricostruito, le Siemens no: senza maschera FOV la
-differenza fra costruttori che si misurerebbe e' una convenzione DICOM, non
-la fisica dell'acquisizione.
+The masks are not optional. GE images in this collection carry 55,772 pixels
+per slice (21.3% of the area) at the padding value -3024 HU outside the
+reconstructed field of view; Siemens images carry none. Without a
+field-of-view mask, the between-vendor difference one would measure is a
+DICOM padding convention, not acquisition physics.
 """
 
 from __future__ import annotations
@@ -24,29 +24,29 @@ from __future__ import annotations
 import numpy as np
 from scipy.ndimage import binary_fill_holes, binary_opening, label
 
-#: finestra HU canonica del modello
+#: canonical HU window of the model
 HU_LO = -1000.0
 HU_HI = 1000.0
 
-#: soglia della maschera corpo, in HU
+#: body-mask threshold, in HU
 BODY_HU = -300.0
-#: lato dell'elemento strutturante per l'apertura morfologica
+#: side of the structuring element of the morphological opening
 BODY_OPEN = 5
 
 
 def to_luminance(hu: np.ndarray, lo: float = HU_LO, hi: float = HU_HI) -> np.ndarray:
-    """Mappa HU su 0-255 float32, con clip alla finestra canonica."""
+    """Map HU to 0-255 float32, clipping to the canonical window."""
     x = np.clip(np.asarray(hu, dtype=np.float32), lo, hi)
     return (255.0 * (x - lo) / (hi - lo)).astype(np.float32)
 
 
 def fov_mask(hu: np.ndarray, padding_value: float | None) -> np.ndarray:
-    """Pixel dentro il campo ricostruito.
+    """Pixels inside the reconstructed field of view.
 
-    Il valore di riempimento dichiarato in PixelPaddingValue e' escluso.  In
-    sua assenza si escludono i pixel sotto -1024 HU, che non sono anatomia:
-    il pavimento fisico della scala e' -1000 e -1024 e' il minimo
-    rappresentabile con RescaleIntercept = -1024.
+    The padding value declared in PixelPaddingValue is excluded. When the tag
+    is absent, pixels below -1024 HU are excluded: they are not anatomy, since
+    the physical floor of the scale is -1000 and -1024 is the minimum
+    representable with RescaleIntercept = -1024.
     """
     hu = np.asarray(hu)
     if padding_value is not None:
@@ -57,7 +57,7 @@ def fov_mask(hu: np.ndarray, padding_value: float | None) -> np.ndarray:
 
 
 def body_mask(hu: np.ndarray, fov: np.ndarray | None = None) -> np.ndarray:
-    """Maschera del corpo: soglia, apertura, riempimento, componente maggiore."""
+    """Body mask: threshold, opening, largest connected component, holes filled."""
     hu = np.asarray(hu)
     m = hu > BODY_HU
     if fov is not None:
@@ -74,7 +74,7 @@ def body_mask(hu: np.ndarray, fov: np.ndarray | None = None) -> np.ndarray:
 
 
 def domain_mask(hu: np.ndarray, padding_value: float | None):
-    """Dominio ammesso per le patch: FOV e corpo.  Ritorna (dominio, fov, corpo)."""
+    """Admissible patch domain: field of view and body. Returns (domain, fov, body)."""
     fov = fov_mask(hu, padding_value)
     body = body_mask(hu, fov)
     return fov & body, fov, body

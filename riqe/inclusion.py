@@ -1,16 +1,15 @@
-"""Criteri di inclusione del corpus pristine, eseguibili e verificabili.
+"""Inclusion criteria of the pristine corpus, executable and auditable.
 
-Disegno: una sola passata calcola per ogni slice un vettore di statistiche
-oggettive (`slice_stats`); i criteri S1-S6 sono poi **operazioni pure sulla
-tabella** delle statistiche (`apply_criteria`).  Cosi' i criteri si possono
-rieseguire, cambiare di soglia e verificare senza rileggere i DICOM, e il
-conteggio degli esclusi per criterio finisce nell'artefatto modello.
+Design: a single pass computes for every slice a vector of objective
+statistics (`slice_stats`); criteria S1-S6 are then **pure operations on the
+table** of statistics (`apply_criteria`). Criteria can therefore be re-run,
+re-thresholded and audited without re-reading the DICOM files, and the count
+of excluded slices per criterion ends up in the model artefact.
 
-Nessun criterio "a occhio": ogni regola e' una funzione booleana con soglia
-dichiarata.  Sul moto sono esplicito: non lo rileviamo direttamente, S1 e S5
-lo mitigano, e la limitazione va dichiarata nell'articolo.  L'alternativa
-"fitta un modello preliminare ed escludi le slice con punteggio alto" e'
-stata scartata perche' circolare.
+No criterion is applied "by eye": every rule is a boolean function with a
+declared threshold. Motion is not detected directly: S1 mitigates it, and the
+limitation is stated in the paper. The alternative "fit a preliminary model
+and exclude high-scoring slices" was rejected as circular.
 """
 
 from __future__ import annotations
@@ -21,56 +20,54 @@ import pandas as pd
 from .hu import BODY_HU, domain_mask
 from .nss import local_stats
 
-# ---- soglie dichiarate -----------------------------------------------------
+# ---- declared thresholds ---------------------------------------------------
 
-#: S1: frazione di slice scartata a ciascun estremo della serie
+#: S1: fraction of slices discarded at each end of a series
 S1_TRIM = 0.10
-#: S2: frazione ammessa di area del corpo rispetto all'area del FOV
+#: S2: admissible body area as a fraction of the field-of-view area
 S2_BODY_FRAC = (0.15, 0.85)
-#: S3: spessore in pixel dell'anello interno al bordo FOV, e frazione ammessa
+#: S3: width in pixels of the ring inside the field-of-view edge, and the
+#: admissible fraction of body pixels on it
 S3_RING_PX = 3
 S3_MAX_ON_RING = 0.02
-#: S4: soglia HU del metallo e frazione ammessa di pixel del corpo oltre.
-#: Calibrata per ispezione visiva su campioni stratificati (docs/04):
-#: 1500 HU e' osso corticale denso, non metallo -- il 43% delle slice supera
-#: quel valore e la mediana del massimo HU nel corpo e' 1471.  A 2000 HU con
-#: frazione 1e-4 si escludono il 3,1% delle slice, restano tutti i 199
-#: pazienti con almeno 58 slice ciascuno, e la regola e' deliberatamente
-#: conservativa: il corpus e' dieci volte piu' grande del necessario, quindi
-#: si preferisce perdere qualche slice di osso denso senza artefatti che
-#: contaminare il pristine.
+#: S4: metal HU threshold and admissible fraction of body pixels above it.
+#: Calibrated by visual inspection of stratified samples: 1500 HU is dense
+#: cortical bone, not metal -- 43% of slices exceed it and the median of the
+#: maximum in-body HU is 1471. At 2000 HU with fraction 1e-4, 3.1% of slices
+#: are excluded and all patients but one keep at least 58 slices. The rule is
+#: deliberately conservative: the corpus is ten times larger than needed, so
+#: losing some artefact-free dense-bone slices is preferable to contaminating
+#: the pristine set.
 S4_METAL_HU = 2000.0
 S4_MAX_FRAC = 1e-4
-#: S5: DISATTIVATO come criterio di esclusione.  La statistica resta
-#: calcolata e registrata, ma non esclude nulla.
+#: S5: DISABLED as an exclusion criterion. The statistic is still computed
+#: and recorded, but excludes nothing.
 #:
-#: Era pensata come rilevatore di strisce da metallo e di moto: sigma locale
-#: mediana nell'aria, z robusto per cella.  La calibrazione l'ha falsificata,
-#: due volte.  Nella prima forma scattava su un solo paziente corpulento, con
-#: immagini pulite, perche' con poca aria attorno al corpo la statistica si
-#: calcolava su pochi pixel al bordo del FOV.  Ristretta all'aria lontana dal
-#: corpo e con un minimo di 5000 pixel, il caso limite resta lo stesso: i sei
-#: valori piu' alti (z ~ 7,5-7,9) sono un paziente con body_frac_fov = 0,94,
-#: cioe' corporatura, non artefatti -- e sono gia' esclusi da S2.
+#: It was intended to detect metal streaks and motion: median local sigma in
+#: air, robust z per protocol cell. Calibration falsified it twice. In its
+#: first form it fired on a single large patient with clean images, because
+#: with little air around the body the statistic was computed on a few pixels
+#: at the field-of-view edge. Restricted to air far from the body and to at
+#: least 5000 pixels, the extreme cases were again a patient with
+#: body_frac_fov = 0.94 -- habitus, not artefacts, and already excluded by S2.
 #:
-#: Prova decisiva in senso contrario: sulle slice con protesi d'anca
-#: bilaterali, il caso di metallo piu' netto del corpus, lo z della sigma nel
-#: corpo vale da -1,0 a -1,6, cioe' va nella direzione **sbagliata** (il
-#: bacino e' una grande regione omogenea di tessuti molli).
+#: Decisive counter-evidence: on slices with bilateral hip prostheses, the
+#: clearest metal case in the corpus, the robust z of in-body sigma is -1.0 to
+#: -1.6, i.e. it moves in the **wrong** direction (the pelvis is a large
+#: homogeneous soft-tissue region).
 #:
-#: Tenerlo attivo significherebbe spacciare per rilevatore di artefatti una
-#: misura di corporatura.  Resta quindi registrato come diagnostica, e il
-#: limite -- moto e strisce non rilevati direttamente -- e' dichiarato
-#: nell'articolo.  Cfr. docs/04-calibrazione-criteri.md.
+#: Keeping it enabled would pass off a habitus measure as an artefact
+#: detector. It stays as a recorded diagnostic, and the limitation -- motion
+#: and streaks not detected directly -- is stated in the paper.
 S5_ENABLED = False
 S5_MAX_Z = 4.0
 S5_MIN_AIR_PX = 5000
-#: S6: slice trattenute per paziente
+#: S6: slices kept per patient
 S6_PER_PATIENT = 24
 
 
 def slice_stats(hu: np.ndarray, padding_value: float | None) -> dict:
-    """Statistiche oggettive di una slice, indipendenti dalle soglie."""
+    """Objective statistics of one slice, independent of the thresholds."""
     dom, fov, body = domain_mask(hu, padding_value)
     n_fov = int(fov.sum())
     n_body = int(body.sum())
@@ -97,24 +94,24 @@ def slice_stats(hu: np.ndarray, padding_value: float | None) -> dict:
     hu_body = hu[body]
     out["metal_frac"] = float((hu_body > S4_METAL_HU).mean())
     out["hu_clip_hi_frac"] = float((hu_body > 1000.0).mean())
-    # soglie multiple: 1500 HU confonde l'osso corticale denso col metallo,
-    # che sta molto piu' in alto.  La soglia si scegliera' dai dati.
+    # several thresholds: 1500 HU confuses dense cortical bone with metal,
+    # which lies much higher. The threshold is chosen from the data.
     for t in (1500, 2000, 2500, 3000):
         out[f"frac_gt_{t}"] = float((hu_body > t).mean())
     out["hu_max_body"] = float(hu_body.max())
     out["hu_p9999_body"] = float(np.percentile(hu_body, 99.99))
 
-    # S3: corpo che tocca il bordo del campo ricostruito
+    # S3: body touching the edge of the reconstructed field of view
     from scipy.ndimage import binary_erosion
 
     inner = binary_erosion(fov, np.ones((2 * S3_RING_PX + 1, 2 * S3_RING_PX + 1), dtype=bool))
     ring = fov & ~inner
     out["ring_frac"] = float((body & ring).sum() / n_body)
 
-    # S5: rumore nell'aria dentro il FOV e fuori dal corpo
+    # S5: noise in the air inside the field of view and outside the body
     _, sigma = local_stats(hu)
-    # solo aria ben fuori dal corpo: vicino alla pelle la ricostruzione e'
-    # rumorosa per ragioni che non c'entrano con gli artefatti
+    # only air well outside the body: near the skin the reconstruction is
+    # noisy for reasons unrelated to artefacts
     from scipy.ndimage import binary_dilation
 
     near_body = binary_dilation(body, np.ones((15, 15), dtype=bool))
@@ -127,7 +124,7 @@ def slice_stats(hu: np.ndarray, padding_value: float | None) -> dict:
 
 
 def _robust_z(x: np.ndarray) -> np.ndarray:
-    """z basato su mediana e MAD, robusto agli outlier che deve trovare."""
+    """z based on median and MAD, robust to the outliers it must find."""
     x = np.asarray(x, dtype=float)
     med = np.nanmedian(x)
     mad = np.nanmedian(np.abs(x - med))
@@ -141,41 +138,42 @@ def apply_criteria(
     cell_col: str = "cell",
     per_patient: int = S6_PER_PATIENT,
 ) -> pd.DataFrame:
-    """Applica S1-S6.  Ritorna il dataframe con una colonna booleana per
-    criterio, `keep` finale e `exclude_reason` del primo criterio fallito.
+    """Apply S1-S6. Returns the dataframe with one boolean column per
+    criterion, the final `keep` and the `exclude_reason` of the first failed
+    criterion.
 
-    Attende le colonne: patient_id, series_uid, sop_uid, z, cell, e le
-    statistiche prodotte da `slice_stats`.
+    Expects the columns patient_id, series_uid, sop_uid, z, cell and the
+    statistics produced by `slice_stats`.
     """
     d = df.copy()
 
-    # S1 - estremi di serie, sull'ordinamento anatomico per z
+    # S1 - series ends, on the anatomical ordering by z
     d = d.sort_values(["series_uid", "z"]).reset_index(drop=True)
     rank = d.groupby("series_uid").cumcount()
     n = d.groupby("series_uid")["z"].transform("size")
     frac = rank / np.maximum(n - 1, 1)
     d["S1_interior"] = (frac >= S1_TRIM) & (frac <= 1.0 - S1_TRIM)
 
-    # S2 - anatomia sufficiente
+    # S2 - sufficient anatomy
     lo, hi = S2_BODY_FRAC
     d["S2_anatomy"] = d["body_frac_fov"].between(lo, hi)
 
-    # S3 - troncamento
+    # S3 - truncation
     d["S3_untruncated"] = d["ring_frac"] <= S3_MAX_ON_RING
 
-    # S4 - metallo.  Si usa la colonna esplicita alla soglia dichiarata, non
-    # `metal_frac`: quest'ultima e' calcolata al momento della passata sui
-    # DICOM e resterebbe legata al valore di S4_METAL_HU vigente allora,
-    # rendendo il criterio silenziosamente incoerente se la soglia cambia.
+    # S4 - metal. Uses the explicit column at the declared threshold, not
+    # `metal_frac`: the latter is computed during the DICOM pass and would
+    # stay tied to the value of S4_METAL_HU in force at that time, making the
+    # criterion silently inconsistent if the threshold changes.
     metal_col = f"frac_gt_{int(S4_METAL_HU)}"
     if metal_col not in d.columns:
         raise KeyError(
-            f"la tabella delle slice non ha {metal_col}: rieseguire "
-            f"build_slice_table.py dopo aver cambiato S4_METAL_HU"
+            f"the slice table has no {metal_col}: re-run build_slice_table.py "
+            f"after changing S4_METAL_HU"
         )
     d["S4_no_metal"] = d[metal_col] <= S4_MAX_FRAC
 
-    # S5 - artefatti a striscia / moto, soglia robusta per cella
+    # S5 - streak / motion artefacts, robust threshold per protocol cell
     z = np.full(len(d), np.nan)
     for _, idx in d.groupby(cell_col).groups.items():
         pos = d.index.get_indexer(idx)
@@ -185,14 +183,14 @@ def apply_criteria(
         d["S5_no_streak"] = ~(d["air_sigma_z"] > S5_MAX_Z)
         d.loc[d["air_sigma_med"].isna(), "S5_no_streak"] = False
     else:
-        # disattivato: la statistica resta registrata ma non esclude
+        # disabled: the statistic stays recorded but excludes nothing
         d["S5_no_streak"] = True
 
     surviving = (
         d["S1_interior"] & d["S2_anatomy"] & d["S3_untruncated"] & d["S4_no_metal"] & d["S5_no_streak"]
     )
 
-    # S6 - campionamento equispaziato fra le sopravvissute, per paziente
+    # S6 - evenly spaced sampling among surviving slices, per patient
     d["S6_sampled"] = False
     for pid, g in d[surviving].groupby("patient_id"):
         g = g.sort_values("z")
@@ -213,7 +211,7 @@ def apply_criteria(
 
 
 def exclusion_report(d: pd.DataFrame) -> pd.DataFrame:
-    """Conteggio degli esclusi per criterio, in cascata (primo che fallisce)."""
+    """Count of excluded slices per criterion, in cascade (first failure)."""
     order = ["S1_interior", "S2_anatomy", "S3_untruncated", "S4_no_metal", "S5_no_streak", "S6_sampled"]
     rows = []
     remaining = len(d)
@@ -221,7 +219,7 @@ def exclusion_report(d: pd.DataFrame) -> pd.DataFrame:
     for c in order:
         failed = int((alive & ~d[c]).sum())
         alive &= d[c]
-        rows.append({"criterio": c, "esclusi": failed, "residui": int(alive.sum())})
+        rows.append({"criterion": c, "excluded": failed, "remaining": int(alive.sum())})
         remaining = int(alive.sum())
-    rows.append({"criterio": "TOTALE trattenute", "esclusi": len(d) - remaining, "residui": remaining})
+    rows.append({"criterion": "TOTAL kept", "excluded": len(d) - remaining, "remaining": remaining})
     return pd.DataFrame(rows)

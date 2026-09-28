@@ -1,13 +1,13 @@
-"""Degradazioni e filtri, con scale dichiarate, piu' il surrogato di
-rilevabilita' di lesioni a basso contrasto.
+"""Degradations and filters on declared ladders, plus the low-contrast lesion
+detectability surrogate.
 
-Tutto opera in unita' Hounsfield, **prima** della mappatura di intensita':
-e' l'unico ordine fisicamente sensato, perche' rumore e filtraggio agiscono
-sull'immagine ricostruita, non sulla sua rappresentazione a 8 bit.
+Everything operates in Hounsfield units, **before** the intensity mapping:
+the only physically meaningful order, because noise and filtering act on the
+reconstructed image, not on its 8-bit representation.
 
-I denoiser vengono da scikit-image (BSD-3).  Niente BM3D: le
-implementazioni disponibili sono GPL o di licenza incerta, e il vincolo di
-licenza del progetto e' non negoziabile.
+Denoisers come from scikit-image (BSD-3). No BM3D: the available
+implementations are GPL or of unclear licence, and the licensing constraint
+of the project is not negotiable.
 """
 
 from __future__ import annotations
@@ -24,14 +24,14 @@ from skimage.restoration import (
 )
 
 # ---------------------------------------------------------------------------
-# Scale di degradazione
+# Degradation ladders
 # ---------------------------------------------------------------------------
 
 NOISE_SIGMAS_HU = (5.0, 10.0, 20.0, 40.0, 80.0)
 BLUR_SIGMAS_PX = (0.5, 1.0, 1.5, 2.0, 3.0)
 
-#: scala fine a partire da zero, per la forma 3 del test del sovrafiltraggio:
-#: serve a cercare un eventuale minimo del punteggio a rumore non nullo
+#: fine ladder starting at zero, for form 3 of the overfiltering test: used to
+#: look for a minimum of the score at non-zero noise
 NOISE_FINE_HU = (0.0, 1.0, 2.0, 3.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0, 45.0, 65.0, 90.0)
 
 
@@ -42,17 +42,16 @@ def add_white_noise(hu: np.ndarray, sigma_hu: float, rng: np.random.Generator) -
 
 
 def _ramp_nps_filter(shape: tuple[int, int], cutoff: float = 0.55) -> np.ndarray:
-    """Filtro radiale tipo retroproiezione filtrata.
+    """Radial filter mimicking filtered back-projection.
 
-    Il rumore della FBP non e' bianco: la rampa |f| del filtro di
-    ricostruzione ne sposta la potenza verso le frequenze medie, con una
-    caduta alla frequenza di taglio del kernel.  Approssimiamo il modulo
-    dello spettro con |f| moltiplicato per una finestra di Hann che si
-    annulla a `cutoff` (in frequenza di Nyquist).
+    FBP noise is not white: the |f| ramp of the reconstruction filter shifts
+    its power towards mid frequencies, with a roll-off at the kernel cut-off.
+    The spectrum magnitude is approximated by |f| times a Hann window that
+    vanishes at `cutoff` (in units of the Nyquist frequency).
     """
     fy = np.fft.fftfreq(shape[0])[:, None]
     fx = np.fft.fftfreq(shape[1])[None, :]
-    r = np.sqrt(fy ** 2 + fx ** 2) / 0.5  # normalizzata a Nyquist = 1
+    r = np.sqrt(fy ** 2 + fx ** 2) / 0.5  # normalised to Nyquist = 1
     w = np.where(r <= cutoff, 0.5 * (1.0 + np.cos(np.pi * r / cutoff)), 0.0)
     return r * w
 
@@ -63,7 +62,7 @@ _NPS_CACHE: dict[tuple[int, int, float], np.ndarray] = {}
 def add_fbp_noise(
     hu: np.ndarray, sigma_hu: float, rng: np.random.Generator, cutoff: float = 0.55
 ) -> np.ndarray:
-    """Rumore correlato con spettro tipo FBP, riscalato a sigma_hu complessiva."""
+    """Correlated FBP-like noise, rescaled to an overall sigma_hu."""
     if sigma_hu <= 0:
         return hu.astype(np.float32, copy=True)
     key = (hu.shape[0], hu.shape[1], cutoff)
@@ -85,7 +84,7 @@ def blur(hu: np.ndarray, sigma_px: float) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Denoiser, con scale di intensita' crescente
+# Denoisers, at increasing strength
 # ---------------------------------------------------------------------------
 
 def _f_gaussian(hu, s):
@@ -116,12 +115,12 @@ def _f_wavelet(hu, s):
     ).astype(np.float32)
 
 
-#: nome -> (funzione, estremi dell'intervallo di ricerca della forza)
-#: Il parametro nativo di ciascun filtro non e' confrontabile con quello
-#: degli altri: `bilateral` a sigma_color 10 tocca l'immagine dieci volte
-#: piu' di `tv` a weight 2.  La forza si calibra quindi per immagine, per
-#: colpire una deviazione standard del residuo dichiarata (vedi
-#: `calibrate_strength`), e le scale sono indicizzate da quella.
+#: name -> (function, bounds of the strength search interval)
+#: The native parameter of each filter is not comparable with the others:
+#: `bilateral` at sigma_color 10 alters the image ten times more than `tv` at
+#: weight 2. Strength is therefore calibrated per image to hit a declared
+#: residual standard deviation (see `calibrate_strength`), and ladders are
+#: indexed by that.
 DENOISERS: dict[str, tuple] = {
     "gaussian": (_f_gaussian, (0.05, 8.0)),
     "tv": (_f_tv, (0.05, 2000.0)),
@@ -130,9 +129,9 @@ DENOISERS: dict[str, tuple] = {
     "wavelet": (_f_wavelet, (0.2, 2000.0)),
 }
 
-#: scala comune di intensita' di filtraggio, in deviazione standard del
-#: residuo dentro il corpo (HU).  E' l'asse x delle figure principali:
-#: fisicamente interpretabile e indipendente dal filtro.
+#: common filtering-strength scale, as the standard deviation of the residual
+#: inside the body (HU). It is the x axis of the main figures: physically
+#: interpretable and independent of the filter.
 RESIDUAL_LEVELS_HU = (2.0, 4.0, 8.0, 16.0, 32.0, 64.0)
 
 
@@ -142,7 +141,7 @@ def apply_denoiser(hu: np.ndarray, name: str, strength) -> np.ndarray:
 
 
 def residual_std(original: np.ndarray, filtered: np.ndarray, mask: np.ndarray | None = None) -> float:
-    """Deviazione standard del residuo, l'unita' comune per appaiare filtri."""
+    """Standard deviation of the residual: the common unit to match filters."""
     d = np.asarray(filtered, dtype=np.float64) - np.asarray(original, dtype=np.float64)
     if mask is not None:
         d = d[mask]
@@ -157,13 +156,13 @@ def calibrate_strength(
     tol: float = 0.03,
     max_iter: int = 24,
 ):
-    """Forza del filtro che produce il residuo richiesto, per bisezione in
-    scala logaritmica.
+    """Filter strength producing the requested residual, by bisection on a
+    logarithmic scale.
 
-    Ritorna (forza, residuo_ottenuto, n_iterazioni).  Se il bersaglio e'
-    fuori dall'intervallo raggiungibile dal filtro su questa immagine,
-    ritorna l'estremo piu' vicino e il residuo corrispondente: il chiamante
-    lo vede dal residuo e lo riporta, invece di far finta di averlo colpito.
+    Returns (strength, residual_obtained, n_iterations). If the target lies
+    outside the range the filter can reach on this image, returns the nearest
+    bound and its residual: the caller sees it from the residual and reports
+    it, instead of pretending to have hit the target.
     """
     fn, (lo, hi) = DENOISERS[name]
     r_lo = residual_std(hu, fn(hu, lo), mask)
@@ -174,7 +173,7 @@ def calibrate_strength(
         return hi, r_hi, 0
     a, b = lo, hi
     for it in range(1, max_iter + 1):
-        m = float(np.sqrt(a * b))  # bisezione geometrica
+        m = float(np.sqrt(a * b))  # geometric bisection
         r = residual_std(hu, fn(hu, m), mask)
         if abs(r - target_residual_hu) <= tol * target_residual_hu:
             return m, r, it
@@ -189,7 +188,7 @@ def calibrate_strength(
 def denoise_at_level(
     hu: np.ndarray, name: str, target_residual_hu: float, mask: np.ndarray | None = None
 ):
-    """Applica il filtro alla forza calibrata.  Ritorna (immagine, info)."""
+    """Apply the filter at the calibrated strength. Returns (image, info)."""
     s, r, it = calibrate_strength(hu, name, target_residual_hu, mask)
     return apply_denoiser(hu, name, s), {
         "denoiser": name,
@@ -202,7 +201,7 @@ def denoise_at_level(
 
 
 # ---------------------------------------------------------------------------
-# Surrogato di rilevabilita': lesioni inserite e filtro adattato NPW
+# Detectability surrogate: inserted lesions and NPW matched filter
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -215,8 +214,8 @@ class Lesion:
 
 
 def _disc(shape, cy, cx, radius_px, edge_px: float = 0.7):
-    """Disco con bordo sfumato su ~1 px, per non introdurre un gradino
-    artificiale che sarebbe piu' facile da rilevare di una lesione vera."""
+    """Disc with an edge softened over ~1 px, so as not to introduce an
+    artificial step that would be easier to detect than a real lesion."""
     yy, xx = np.ogrid[: shape[0], : shape[1]]
     r = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
     return np.clip((radius_px + edge_px - r) / (2 * edge_px), 0.0, 1.0)
@@ -232,11 +231,11 @@ def find_homogeneous_sites(
     sigma_quantile: float = 0.5,
     min_sep_px: float | None = None,
 ):
-    """Siti di parenchima omogeneo dove inserire lesioni o misurare controlli.
+    """Sites of homogeneous parenchyma where lesions are inserted.
 
-    Criteri: media locale in `hu_range` (tessuto molle / parenchima epatico),
-    deviazione standard locale sotto la mediana dell'immagine, e distanza dal
-    bordo del corpo di almeno un diametro.
+    Criteria: local mean within `hu_range` (soft tissue / liver parenchyma),
+    local standard deviation below the image median, and distance from the
+    body boundary of at least one diameter.
     """
     from scipy.ndimage import binary_erosion
 
@@ -283,11 +282,10 @@ def insert_lesions(
 
 
 def _template(radius_px: float, half: int) -> np.ndarray:
-    """Template del filtro adattato: il profilo noto della lesione, a media
-    nulla, normalizzato.  Non pre-imbianca (NPW) e non applica filtro
-    oculare: quest'ultimo richiederebbe ipotesi arbitrarie su distanza di
-    visione e caratteristiche del display, indifendibili in un lavoro che
-    non fa validazione con lettori umani.
+    """Matched-filter template: the known lesion profile, zero mean,
+    normalised. It does not prewhiten (NPW) and applies no eye filter: the
+    latter would need arbitrary assumptions about viewing distance and
+    display, which cannot be justified in a study without human readers.
     """
     n = 2 * half + 1
     t = _disc((n, n), half, half, radius_px)
@@ -297,7 +295,7 @@ def _template(radius_px: float, half: int) -> np.ndarray:
 
 
 def npw_response(img: np.ndarray, sites, radius_px: float) -> np.ndarray:
-    """Risposta del filtro adattato NPW nei siti indicati."""
+    """Response of the NPW matched filter at the given sites."""
     half = int(np.ceil(radius_px * 2.5))
     t = _template(radius_px, half)
     out = []
@@ -324,32 +322,32 @@ def dprime_task(
     filt=None,
     noise: str = "fbp",
 ):
-    """d\' del filtro adattato NPW, con la varianza presa **sulle
-    realizzazioni di rumore allo stesso sito**.
+    """NPW matched-filter d', with the variance taken **over noise
+    realisations at the same site**.
 
-    Perche' cosi' e non confrontando siti diversi: la risposta del template
-    su siti anatomici diversi varia soprattutto per la variabilita'
-    dell'anatomia, che e' di ordini di grandezza maggiore del segnale di una
-    lesione a basso contrasto.  Un d\' costruito su quella varianza misura
-    quanto e' eterogeneo il fegato, non quanto e' rilevabile la lesione.
-    Confrontando invece lo stesso sito fra presenza e assenza di lesione su
-    realizzazioni di rumore indipendenti, il termine anatomico si cancella
-    esattamente e resta solo il rumore, che e' cio' che il filtro modifica.
+    Why this and not a comparison across different sites: the template
+    response at different anatomical sites varies mostly because of
+    anatomical variability, orders of magnitude larger than the signal of a
+    low-contrast lesion. A d' built on that variance measures how
+    heterogeneous the liver is, not how detectable the lesion is. Comparing
+    instead the same site with and without the lesion over independent noise
+    realisations cancels the anatomical term exactly and leaves the noise,
+    which is what the filter modifies.
 
-    Procedura, per ciascuna delle `n_realizations` realizzazioni:
-      1. genera una realizzazione di rumore a `noise_sigma_hu`;
-      2. costruisce l'immagine con e senza lesioni, stesso rumore;
-      3. applica lo stesso filtro `filt` a entrambe (None = nessun filtro);
-      4. registra la risposta del template nei siti.
+    Procedure, for each of `n_realizations` realisations:
+      1. generate a noise realisation at `noise_sigma_hu`;
+      2. build the image with and without lesions, same noise;
+      3. apply the same filter `filt` to both (None = no filter);
+      4. record the template response at the sites.
 
-    Poi, per ogni sito:
-      Delta = media(lambda_presenza - lambda_assenza)   (segnale residuo
-              dopo il filtro, che cattura la perdita di contrasto)
-      sigma = deviazione standard di lambda_assenza sulle realizzazioni
-      d' del sito = Delta / sigma
-    e d\' complessivo = media sui siti.
+    Then, per site:
+      Delta = mean(lambda_present - lambda_absent)   (signal left after the
+              filter, capturing loss of contrast)
+      sigma = standard deviation of lambda_absent over realisations
+      d' of the site = Delta / sigma
+    and the overall d' is the mean over sites.
 
-    Ritorna (d_prime, dettagli).
+    Returns (d_prime, details).
     """
     if len(sites) == 0:
         return float("nan"), {}
@@ -375,12 +373,12 @@ def dprime_task(
     with np.errstate(divide="ignore", invalid="ignore"):
         dp = np.where(sd > 0, delta / sd, np.nan)
 
-    # Ritenzione del segnale: quanta ampiezza della lesione sopravvive al
-    # filtro.  Serve perche' il d' del filtro adattato con template noto e'
-    # poco sensibile al lisciamento (il filtro ottimale riduce segnale e
-    # rumore nella stessa banda), mentre la perdita di ampiezza e' cio' che
-    # cancella una lesione all'occhio.  Le due misure vanno riportate
-    # insieme: se divergono, e' informazione, non rumore.
+    # Signal retention: how much of the lesion amplitude survives the filter.
+    # Needed because the d' of a matched filter with known template is barely
+    # sensitive to smoothing (the optimal filter reduces signal and noise in
+    # the same band), whereas loss of amplitude is what erases a lesion to the
+    # eye. The two measures are reported together: when they diverge, that is
+    # information, not noise.
     half = int(np.ceil(radius_px * 2.5))
     t = _template(radius_px, half)
     ref_delta = float(np.nansum(

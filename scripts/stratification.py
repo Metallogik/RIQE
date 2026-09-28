@@ -1,38 +1,37 @@
 #!/usr/bin/env python3
-"""Esperimento centrale: serve un modello unico o stratificato?
+"""Central experiment: is a single model enough, or is stratification needed?
 
-Per ogni contrasto fra due gruppi di pazienti si calcola la divergenza fra i
-due modelli e la si confronta con due riferimenti misurati sullo stesso
+For every contrast between two groups of patients, the divergence between the
+two models is computed and compared with two references measured on the same
 corpus:
 
-  ANCORA BASSA, nulla di permutazione.  Si mettono in comune i pazienti dei
-  due gruppi e si ripartiscono a caso, **per paziente**, in due gruppi delle
-  stesse dimensioni.  La distribuzione di D che ne esce e' cio' che si
-  osserverebbe se il fattore non contasse nulla.  E' esatta, e' appaiata per
-  numerosita' **per costruzione** (il che elimina l'artefatto per cui uno
-  strato piccolo sembra divergente solo perche' Sigma e' stimata peggio), e
-  non richiede assunzioni distributive.
+  LOWER ANCHOR, permutation null. The patients of the two groups are pooled
+  and reassigned at random, **by patient**, to two groups of the same sizes.
+  The resulting distribution of D is what one would observe if the factor did
+  not matter at all. It is exact, it is matched in sample size **by
+  construction** (which removes the artefact whereby a small stratum looks
+  divergent only because its Sigma is estimated worse), and it needs no
+  distributional assumption.
 
-  ANCORA ALTA, differenza fisica reale.  D fra il modello a dose piena e
-  quello a dose ridotta sugli **stessi** pazienti: una differenza di
-  acquisizione vera, della grandezza che la metrica deve rilevare.  Il suo
-  nullo e' la permutazione appaiata dell'etichetta dose dentro ciascun
-  paziente.
+  UPPER ANCHOR, a real physical difference. D between the full-dose model and
+  the reduced-dose model on the **same** patients: a true acquisition
+  difference, of the size the metric must detect. Its null is the paired
+  permutation of the dose label within each patient.
 
-L'indice riportato e'
+The reported index is
 
-    eta = (D_oss - mediana(nullo)) / (D_dose - mediana(nullo_dose))
+    eta = (D_obs - median(null)) / (D_dose - median(null_dose))
 
-cioe' l'eccesso sul rumore di campionamento, in unita' dell'eccesso prodotto
-da una differenza fisica nota.
+i.e. the excess over sampling noise, in units of the excess produced by a
+known physical difference.
 
-REGOLA DI DECISIONE, dichiarata prima di eseguire (docs/01-proposta.md 5.3):
-lo strato richiede un sotto-modello proprio se e solo se
-  (a) p di permutazione < 0,05, E
-  (b) eta >= 0,25, E
-  (c) il criterio operativo fallisce (Spearman < 0,95 sul banco comune,
-      oppure un ribaltamento di verdetto).
-Le condizioni (a) e (b) si valutano qui; la (c) in run_battery.py.
+DECISION RULE, declared before running: a stratum needs its own sub-model if
+and only if
+  (a) permutation p < 0.05, AND
+  (b) eta >= 0.25, AND
+  (c) the operational criterion fails (Spearman < 0.95 on the common bank,
+      or a verdict reversal).
+Conditions (a) and (b) are evaluated here; (c) in run_battery.py.
 
     .venv/bin/python scripts/stratification.py --P 16 --C 0.25 --p 0.2
 """
@@ -41,9 +40,9 @@ from __future__ import annotations
 
 import os
 
-# Un thread per processo: il parallelismo lo diamo con i processi, e lasciare
-# che ogni worker apra i propri thread BLAS porta a oversubscription (load 90
-# su 32 core, misurato) invece che a velocita'. Va fatto prima di numpy.
+# One thread per process: parallelism comes from processes, and letting every
+# worker open its own BLAS threads causes oversubscription (load 90 on 32
+# cores, measured) instead of speed. Must be set before importing numpy.
 for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
            "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_v, "1")
@@ -80,7 +79,7 @@ def fit_group(cache, by_patient, pids, p):
 
 
 def permutation_null(cache, by_patient, pids_a, pids_b, p, B, seed):
-    """Nullo: ripartizione casuale **per paziente** del pool A+B."""
+    """Null: random reassignment **by patient** of the pool A+B."""
     rng = np.random.default_rng(seed)
     pool = list(pids_a) + list(pids_b)
     na = len(pids_a)
@@ -97,11 +96,11 @@ def permutation_null(cache, by_patient, pids_a, pids_b, p, B, seed):
 
 
 def paired_dose_anchor(cache, full_by_patient, low_by_patient, pids, p, B, seed):
-    """Ancora alta e il suo nullo appaiato.
+    """Upper anchor and its paired null.
 
-    Nullo: per ogni paziente si scambia a caso l'etichetta dose piena / dose
-    ridotta.  Se la dose non contasse, i due modelli risultanti sarebbero
-    equivalenti.
+    Null: for every patient the full-dose / reduced-dose label is swapped at
+    random. If dose did not matter, the two resulting models would be
+    equivalent.
     """
     rng = np.random.default_rng(seed)
     m_full = cache.fit_fast([q for pid in pids for q in full_by_patient[pid]], p, n_patients=len(pids))
@@ -137,25 +136,25 @@ def contrast_row(name, axis, cache, by_patient, pids_a, pids_b, p, B, seed, anch
     shift = feature_shift(ma, mb)
     top = np.argsort(-np.abs(np.nan_to_num(shift)))[:4]
     return {
-        "contrasto": name,
-        "asse": axis,
+        "contrast": name,
+        "axis": axis,
         "n_A": len(pids_a),
         "n_B": len(pids_b),
-        "D_oss": d_obs,
-        "nullo_mediana": med,
-        "nullo_p95": float(np.nanpercentile(null, 95)),
+        "D_obs": d_obs,
+        "null_median": med,
+        "null_p95": float(np.nanpercentile(null, 95)),
         "p_perm": pval,
         "eta": eta,
-        "KL_sim": symmetric_kl(ma, mb),
+        "KL_sym": symmetric_kl(ma, mb),
         "cond_A": ma.cond(),
         "cond_B": mb.cond(),
         "patch_A": ma.n_patches,
         "patch_B": mb.n_patches,
-        "feature_dominanti": ", ".join(
+        "dominant_features": ", ".join(
             f"{FEATURE_NAMES[i]}={shift[i]:+.2f}" for i in top if np.isfinite(shift[i])
         ),
-        "significativo_a": bool(pval < 0.05),
-        "rilevante_b": bool(np.isfinite(eta) and eta >= 0.25),
+        "significant_a": bool(pval < 0.05),
+        "relevant_b": bool(np.isfinite(eta) and eta >= 0.25),
     }
 
 
@@ -164,7 +163,7 @@ def main() -> int:
     ap.add_argument("--P", type=int, default=None)
     ap.add_argument("--C", type=float, default=None)
     ap.add_argument("--p", type=float, default=None)
-    ap.add_argument("--B", type=int, default=200, help="ripetizioni di permutazione")
+    ap.add_argument("--B", type=int, default=200, help="permutation repetitions")
     ap.add_argument("--seed", type=int, default=20260917)
     ap.add_argument("--out", default="experiments/stratification.csv")
     args = ap.parse_args()
@@ -174,8 +173,8 @@ def main() -> int:
         ch = json.loads(choice_file.read_text())
         args.P, args.C, args.p = ch["P"], ch["C"], ch["p"]
     if args.P is None:
-        ap.error("servono --P --C --p, oppure experiments/hparam_choice.json")
-    print(f"iperparametri: P={args.P} C={args.C:g} p={args.p:g}, B={args.B} permutazioni")
+        ap.error("need --P --C --p, or experiments/hparam_choice.json")
+    print(f"hyperparameters: P={args.P} C={args.C:g} p={args.p:g}, B={args.B} permutations")
 
     corpus = pd.read_parquet(ROOT / "corpus" / "corpus.parquet")
     split = json.load(open(ROOT / "corpus" / "split.json"))
@@ -191,20 +190,20 @@ def main() -> int:
         cell=("cell", "first"), manufacturer=("manufacturer", "first"),
         body_part=("body_part", "first"), kernel=("kernel", "first"),
         thickness=("slice_thickness", "first"), ps=("pixel_spacing", "median"))
-    print(f"pazienti FIT: {len(meta)}; con dose ridotta: {len(by_low)}")
+    print(f"FIT patients: {len(meta)}; with reduced dose: {len(by_low)}")
     print(meta.groupby("cell").size().to_string())
 
     t0 = time.time()
-    # --- ancora alta: contrasto di dose, appaiato --------------------------
+    # --- upper anchor: paired dose contrast ---------------------------------
     dose_pids = sorted(set(by_low) & set(by_full))
     d_dose, null_dose, m_full_d, m_low_d = paired_dose_anchor(
         cache, by_full, by_low, dose_pids, args.p, args.B, args.seed)
     anchor_excess = d_dose - float(np.nanmedian(null_dose))
-    print(f"\nANCORA ALTA (dose piena vs ridotta, {len(dose_pids)} pazienti appaiati):")
-    print(f"  D = {d_dose:.4f}, nullo appaiato mediana {np.nanmedian(null_dose):.4f}, "
-          f"p95 {np.nanpercentile(null_dose,95):.4f}, eccesso {anchor_excess:.4f}")
+    print(f"\nUPPER ANCHOR (full vs reduced dose, {len(dose_pids)} paired patients):")
+    print(f"  D = {d_dose:.4f}, paired null median {np.nanmedian(null_dose):.4f}, "
+          f"p95 {np.nanpercentile(null_dose,95):.4f}, excess {anchor_excess:.4f}")
 
-    # --- contrasti ---------------------------------------------------------
+    # --- contrasts -----------------------------------------------------------
     g = lambda **kw: sorted(meta[np.logical_and.reduce(
         [meta[k] == v for k, v in kw.items()])].index)
 
@@ -213,67 +212,67 @@ def main() -> int:
     si_abd = g(manufacturer="SIEMENS", body_part="ABDOMEN")
     ge_chest = sorted(meta[(meta.manufacturer == "GE") & (meta.body_part == "CHEST")].index)
     si_chest = g(manufacturer="SIEMENS", body_part="CHEST")
-    contrasts.append(("A: addome 5mm, GE STANDARD vs Siemens B30f", "kernel/costruttore", ge_abd, si_abd))
-    contrasts.append(("B: torace, GE STANDARD 1,25 vs Siemens B50f 1,5", "kernel/costruttore", ge_chest, si_chest))
-    contrasts.append(("C: GE, torace 1,25 vs addome 5", "spessore+anatomia (confusi)", ge_chest, ge_abd))
-    contrasts.append(("D: Siemens, torace B50f 1,5 vs addome B30f 5", "kernel+spessore+anatomia", si_chest, si_abd))
-    # ATTENZIONE: questo NON e' un controllo negativo sull'anatomia, per
-    # quanto sia la tentazione naturale di chiamarlo cosi'.  In questa
-    # collezione il torace e' *sempre* kernel netto e strato sottile e
-    # l'addome *sempre* kernel morbido e strato spesso: il contrasto mescola
-    # anatomia, kernel e spessore in modo inseparabile.  Un controllo
-    # negativo pulito sull'anatomia **non esiste** in questi dati, e va
-    # dichiarato come limite invece di essere simulato con questo contrasto.
-    contrasts.append(("G: torace vs addome (anatomia CONFUSA con kernel e spessore)",
-                      "anatomia+kernel+spessore (NON e' un controllo negativo)",
+    contrasts.append(("A: abdomen 5 mm, GE STANDARD vs Siemens B30f", "kernel/vendor", ge_abd, si_abd))
+    contrasts.append(("B: chest, GE STANDARD 1.25 vs Siemens B50f 1.5", "kernel/vendor", ge_chest, si_chest))
+    contrasts.append(("C: GE, chest 1.25 vs abdomen 5", "thickness+anatomy (confounded)", ge_chest, ge_abd))
+    contrasts.append(("D: Siemens, chest B50f 1.5 vs abdomen B30f 5", "kernel+thickness+anatomy", si_chest, si_abd))
+    # WARNING: this is NOT a negative control on anatomy, however tempting it
+    # is to call it one. In this collection the chest is *always* a sharp
+    # kernel with thin slices and the abdomen *always* a soft kernel with
+    # thick slices: the contrast mixes anatomy, kernel and thickness
+    # inseparably. A clean negative control on anatomy **does not exist** in
+    # these data, and must be declared as a limitation rather than simulated
+    # with this contrast.
+    contrasts.append(("G: chest vs abdomen (anatomy CONFOUNDED with kernel and thickness)",
+                      "anatomy+kernel+thickness (NOT a negative control)",
                       sorted(set(ge_chest) | set(si_chest)), sorted(set(ge_abd) | set(si_abd))))
-    contrasts.append(("H: costruttore, tutti GE vs tutti Siemens", "costruttore",
+    contrasts.append(("H: vendor, all GE vs all Siemens", "vendor",
                       sorted(meta[meta.manufacturer == "GE"].index),
                       sorted(meta[meta.manufacturer == "SIEMENS"].index)))
-    # E: pixel spacing, terzili entro la stessa cella per non confondere col protocollo
+    # E: pixel spacing, tertiles within the same cell so as not to confound with protocol
     for cell in sorted(meta.cell.unique()):
         sub = meta[meta.cell == cell].sort_values("ps")
         if len(sub) < 20:
             continue
         k = len(sub) // 3
-        contrasts.append((f"E: pixel spacing, terzile basso vs alto — {cell}",
-                          "campionamento spaziale",
+        contrasts.append((f"E: pixel spacing, low vs high tertile — {cell}",
+                          "spatial sampling",
                           sorted(sub.index[:k]), sorted(sub.index[-k:])))
 
     rows = []
     for i, (name, axis, a, b) in enumerate(contrasts):
         if len(a) < 5 or len(b) < 5:
-            print(f"  salto {name}: gruppi troppo piccoli ({len(a)}, {len(b)})")
+            print(f"  skipping {name}: groups too small ({len(a)}, {len(b)})")
             continue
         r = contrast_row(name, axis, cache, by_full, a, b, args.p, args.B,
                          args.seed + 31 * i, anchor_excess)
         rows.append(r)
-        print(f"  {name[:52]:52s} D={r['D_oss']:.4f} nullo={r['nullo_mediana']:.4f} "
+        print(f"  {name[:52]:52s} D={r['D_obs']:.4f} null={r['null_median']:.4f} "
               f"p={r['p_perm']:.3f} eta={r['eta']:+.3f}", flush=True)
 
     rows.append({
-        "contrasto": "ANCORA: dose piena vs ridotta (stessi pazienti)",
-        "asse": "dose", "n_A": len(dose_pids), "n_B": len(dose_pids),
-        "D_oss": d_dose, "nullo_mediana": float(np.nanmedian(null_dose)),
-        "nullo_p95": float(np.nanpercentile(null_dose, 95)),
+        "contrast": "ANCHOR: full vs reduced dose (same patients)",
+        "axis": "dose", "n_A": len(dose_pids), "n_B": len(dose_pids),
+        "D_obs": d_dose, "null_median": float(np.nanmedian(null_dose)),
+        "null_p95": float(np.nanpercentile(null_dose, 95)),
         "p_perm": float((np.nansum(null_dose >= d_dose) + 1) / (np.sum(np.isfinite(null_dose)) + 1)),
-        "eta": 1.0, "KL_sim": symmetric_kl(m_full_d, m_low_d),
+        "eta": 1.0, "KL_sym": symmetric_kl(m_full_d, m_low_d),
         "cond_A": m_full_d.cond(), "cond_B": m_low_d.cond(),
         "patch_A": m_full_d.n_patches, "patch_B": m_low_d.n_patches,
-        "feature_dominanti": "", "significativo_a": True, "rilevante_b": True,
+        "dominant_features": "", "significant_a": True, "relevant_b": True,
     })
 
     df = pd.DataFrame(rows)
-    df["decisione_ab"] = np.where(
-        df.significativo_a & df.rilevante_b,
-        "serve (a) e (b): verificare (c) operativo",
-        np.where(df.significativo_a, "distinguibile ma sotto soglia di rilevanza",
-                 "indistinguibile dal rumore di campionamento"))
+    df["decision_ab"] = np.where(
+        df.significant_a & df.relevant_b,
+        "(a) and (b) met: check operational (c)",
+        np.where(df.significant_a, "distinguishable but below the relevance threshold",
+                 "indistinguishable from sampling noise"))
     out = ROOT / args.out
     df.to_csv(out, index=False)
-    print(f"\nscritto {out}  ({(time.time()-t0)/60:.1f} min)")
-    print(df[["contrasto", "asse", "n_A", "n_B", "D_oss", "nullo_mediana",
-              "p_perm", "eta", "decisione_ab"]].to_string(index=False))
+    print(f"\nwrote {out}  ({(time.time()-t0)/60:.1f} min)")
+    print(df[["contrast", "axis", "n_A", "n_B", "D_obs", "null_median",
+              "p_perm", "eta", "decision_ab"]].to_string(index=False))
     return 0
 
 

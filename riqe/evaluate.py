@@ -1,9 +1,8 @@
-"""Utilita' condivise dalla batteria di validazione.
+"""Utilities shared by the validation battery.
 
-Caricamento dei momenti del banco, punteggio contro un modello, e le
-statistiche di ordinamento usate piu' volte.  Sta qui per evitare che i sei
-esperimenti divergano su dettagli come il trattamento dei punteggi non
-definiti.
+Loading bank moments, scoring against a model, and the ranking statistics
+used repeatedly. Kept in one place so that the experiments cannot diverge on
+details such as the handling of undefined scores.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from .model import RCOND, MVGModel, mahalanobis_mixed
 
 
 def load_moments(path: str | Path):
-    """Ritorna (meta, NU, SIGMA).  `meta` ha una riga per immagine di prova."""
+    """Returns (meta, NU, SIGMA). `meta` has one row per test image."""
     z = np.load(path, allow_pickle=False)
     meta = pd.DataFrame(json.loads(str(z["meta"])))
     meta["slice_path"] = json.loads(str(z["slice_path"]))
@@ -30,7 +29,7 @@ def load_moments(path: str | Path):
 
 
 def score_all(model: MVGModel, NU: np.ndarray, SG: np.ndarray, rows) -> np.ndarray:
-    """Punteggi di un insieme di righe.  NaN dove non definibile."""
+    """Scores of a set of rows. NaN where undefined."""
     rows = np.asarray(rows, dtype=int)
     out = np.full(len(rows), np.nan)
     for k, i in enumerate(rows):
@@ -46,7 +45,7 @@ def attach_scores(meta: pd.DataFrame, model: MVGModel, NU, SG, col: str = "score
 
 
 def step_monotone(seq: np.ndarray, increasing: bool = True) -> bool:
-    """Monotonicita' **a ogni passo**, non solo globale."""
+    """Monotonicity **at every step**, not merely overall."""
     s = np.asarray(seq, dtype=float)
     if not np.isfinite(s).all() or len(s) < 2:
         return False
@@ -68,8 +67,8 @@ def spearman(x, y) -> float:
 
 
 def kendall_w(rank_matrix: np.ndarray) -> float:
-    """W di Kendall: concordanza fra piu' giudici (qui: piu' immagini) su un
-    insieme di oggetti (qui: i denoiser).  1 = accordo perfetto."""
+    """Kendall's W: agreement among several judges (here: images) on a set of
+    objects (here: denoisers). 1 = perfect agreement."""
     R = np.asarray(rank_matrix, dtype=float)
     R = R[np.isfinite(R).all(axis=1)]
     m, n = R.shape
@@ -81,7 +80,7 @@ def kendall_w(rank_matrix: np.ndarray) -> float:
 
 
 def sign_test(a, b) -> tuple[int, int, float]:
-    """Test dei segni appaiato.  Ritorna (n_positivi, n_validi, p bilaterale)."""
+    """Paired sign test. Returns (n_positive, n_valid, two-sided p)."""
     from scipy.stats import binomtest
 
     a = np.asarray(a, dtype=float)
@@ -95,7 +94,7 @@ def sign_test(a, b) -> tuple[int, int, float]:
 
 
 def holm(pvals: dict[str, float]) -> dict[str, float]:
-    """Correzione di Holm-Bonferroni per confronti multipli."""
+    """Holm-Bonferroni correction for multiple comparisons."""
     items = sorted(((k, v) for k, v in pvals.items() if np.isfinite(v)), key=lambda t: t[1])
     m = len(items)
     out, prev = {}, 0.0

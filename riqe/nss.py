@@ -1,27 +1,26 @@
-"""Feature NSS in stile NIQE, implementate dall'articolo primario.
+"""NIQE-style NSS features, implemented from the original paper.
 
-Fonte dell'algoritmo: A. Mittal, R. Soundararajan, A. C. Bovik, "Making a
+Source of the algorithm: A. Mittal, R. Soundararajan, A. C. Bovik, "Making a
 'Completely Blind' Image Quality Analyzer", IEEE Signal Processing Letters
-20(3):209-212, 2013.  Stima dei parametri GGD per momento secondo
-K. Sharifi, A. Leon-Garcia, IEEE TCSVT 5(1):52-56, 1995 (rif. [14]
-dell'articolo NIQE); stima AGGD secondo N.-E. Lasmar, Y. Stitou,
-Y. Berthoumieu, ICIP 2009 (rif. [15]).
+20(3):209-212, 2013. GGD parameters by moment matching after K. Sharifi,
+A. Leon-Garcia, IEEE TCSVT 5(1):52-56, 1995 (ref. [14] of the NIQE paper);
+AGGD parameters after N.-E. Lasmar, Y. Stitou, Y. Berthoumieu, ICIP 2009
+(ref. [15]).
 
-Nessun codice del pacchetto MATLAB di LIVE e' stato consultato o tradotto.
+No code from the LIVE MATLAB package was consulted or translated.
 
-Scelte che l'articolo lascia implicite, qui esplicite e registrate
-nell'artefatto modello (cfr. docs/02-spec-niqe.md):
+Choices the paper leaves implicit, made explicit here and recorded in the
+model artefact:
 
-  * sigma del kernel gaussiano: 1.0 su finestra 7x7.  L'articolo dice
-    "sampled out to 3 standard deviations (K = L = 3)", che con semiampiezza
-    3 implica letteralmente sigma = 1.0.
-  * costante di stabilizzazione C in (I - mu)/(sigma + C): nell'articolo e'
-    fissata a 1 su immagini 0-255.  Qui e' un parametro dichiarato, perche'
-    su TC la sigma locale in unita' di codice e' molto piu' piccola che in
-    fotografia e C = 1 renderebbe la normalizzazione divisiva parziale e
-    dipendente dal protocollo (cfr. docs/01-proposta.md 2.4).
-  * filtro passa-basso della seconda scala: lo stesso kernel gaussiano,
-    seguito da decimazione 2:1.
+  * standard deviation of the Gaussian window: 1.0 on a 7x7 window. The paper
+    says "sampled out to 3 standard deviations (K = L = 3)", which with a
+    half-width of 3 literally means sigma = 1.0.
+  * stabilising constant C in (I - mu)/(sigma + C): fixed to 1 in the paper
+    for 0-255 images. Here it is a declared parameter, because in CT the local
+    sigma in code units is much smaller than in photographs and C = 1 would
+    make the divisive normalisation partial and protocol dependent.
+  * low-pass filter of the second scale: the same Gaussian kernel, followed
+    by 2:1 decimation.
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ from scipy.ndimage import correlate1d
 from scipy.special import gammaln
 
 # --------------------------------------------------------------------------
-# Kernel gaussiano dell'articolo: 7x7, sigma = 1.0, volume unitario
+# Gaussian kernel of the paper: 7x7, sigma = 1.0, unit volume
 # --------------------------------------------------------------------------
 
 GAUSS_SIGMA = 1.0
@@ -41,11 +40,11 @@ GAUSS_HALFWIDTH = 3  # K = L = 3
 
 
 def gaussian_weights(sigma: float = GAUSS_SIGMA, halfwidth: int = GAUSS_HALFWIDTH):
-    """Kernel 1-D separabile equivalente al kernel 2-D a simmetria circolare.
+    """Separable 1-D kernel equivalent to the circularly symmetric 2-D kernel.
 
-    Un gaussiano 2-D a simmetria circolare e' separabile, quindi il kernel
-    2-D normalizzato a volume unitario si ottiene dal prodotto esterno del
-    kernel 1-D normalizzato a somma unitaria.
+    A circularly symmetric 2-D Gaussian is separable, so the 2-D kernel
+    normalised to unit volume is the outer product of the 1-D kernel
+    normalised to unit sum.
     """
     x = np.arange(-halfwidth, halfwidth + 1, dtype=np.float64)
     w = np.exp(-(x ** 2) / (2.0 * sigma ** 2))
@@ -56,13 +55,13 @@ _W1D = gaussian_weights()
 
 
 def _sepconv(img: np.ndarray, w: np.ndarray = _W1D) -> np.ndarray:
-    """Convoluzione separabile con estensione a riflessione dei bordi."""
+    """Separable convolution with reflective boundary extension."""
     out = correlate1d(img, w, axis=0, mode="reflect")
     return correlate1d(out, w, axis=1, mode="reflect")
 
 
 def local_stats(img: np.ndarray):
-    """Media e deviazione standard locali pesate, formule (2) e (3)."""
+    """Weighted local mean and standard deviation, equations (2) and (3)."""
     img = np.asarray(img, dtype=np.float64)
     mu = _sepconv(img)
     mu_sq = _sepconv(img * img)
@@ -72,18 +71,17 @@ def local_stats(img: np.ndarray):
 
 
 def mscn(img: np.ndarray, C: float = 1.0):
-    """Coefficienti MSCN, formula (1).  Ritorna (mscn, campo sigma)."""
+    """MSCN coefficients, equation (1). Returns (mscn, sigma field)."""
     mu, sigma = local_stats(img)
     return (np.asarray(img, dtype=np.float64) - mu) / (sigma + C), sigma
 
 
 # --------------------------------------------------------------------------
-# Inversione dei rapporti di momenti per GGD e AGGD
+# Inversion of the moment ratios for GGD and AGGD
 #
-# Entrambe le stime richiedono di invertire una funzione monotona di alpha
-# fatta di funzioni gamma.  Tabuliamo su una griglia fitta e interpoliamo:
-# l'inversione e' esatta entro il passo della griglia, e il passo e'
-# registrato nell'artefatto.
+# Both estimates require inverting a monotone function of alpha made of gamma
+# functions. We tabulate it on a fine grid and interpolate: the inversion is
+# exact within the grid step, and the grid is recorded in the artefact.
 # --------------------------------------------------------------------------
 
 _ALPHA_MIN, _ALPHA_MAX, _ALPHA_N = 0.05, 20.0, 40001
@@ -94,15 +92,15 @@ def _lgam(x):
     return gammaln(x)
 
 
-# GGD:  rho(alpha) = Gamma(1/a) Gamma(3/a) / Gamma(2/a)^2,  decrescente in a
+# GGD:  rho(alpha) = Gamma(1/a) Gamma(3/a) / Gamma(2/a)^2,  decreasing in a
 _GGD_RHO = np.exp(
     _lgam(1.0 / _ALPHA_GRID) + _lgam(3.0 / _ALPHA_GRID) - 2.0 * _lgam(2.0 / _ALPHA_GRID)
 )
-# per np.interp servono ascisse crescenti: rho decresce, quindi invertiamo
+# np.interp needs increasing abscissae: rho decreases, so we reverse
 _GGD_RHO_ASC = _GGD_RHO[::-1]
 _GGD_ALPHA_ASC = _ALPHA_GRID[::-1]
 
-# AGGD:  rho(alpha) = Gamma(2/a)^2 / (Gamma(1/a) Gamma(3/a)),  crescente in a
+# AGGD:  rho(alpha) = Gamma(2/a)^2 / (Gamma(1/a) Gamma(3/a)),  increasing in a
 _AGGD_RHO = 1.0 / _GGD_RHO
 
 
@@ -115,16 +113,16 @@ def _invert_aggd(rho: np.ndarray) -> np.ndarray:
 
 
 def _beta_scale(alpha: np.ndarray) -> np.ndarray:
-    """sqrt(Gamma(1/a) / Gamma(3/a)), fattore che porta da sigma a beta."""
+    """sqrt(Gamma(1/a) / Gamma(3/a)), the factor from sigma to beta."""
     return np.exp(0.5 * (_lgam(1.0 / alpha) - _lgam(3.0 / alpha)))
 
 
 # --------------------------------------------------------------------------
-# Riduzioni a blocchi: tutti i momenti per patch in forma vettorizzata
+# Block reductions: all per-patch moments in vectorised form
 # --------------------------------------------------------------------------
 
 def _blocks(a: np.ndarray, P: int) -> np.ndarray:
-    """Vista (n_patch, P*P) dei blocchi non sovrapposti PxP."""
+    """(n_patch, P*P) view of the non-overlapping PxP blocks."""
     h, w = a.shape
     nh, nw = h // P, w // P
     return (
@@ -136,10 +134,10 @@ def _blocks(a: np.ndarray, P: int) -> np.ndarray:
 
 
 def _ggd_features_blocks(blk: np.ndarray):
-    """(alpha, beta) per blocco da una GGD a media nulla.
+    """(alpha, beta) per block from a zero-mean GGD.
 
-    Sharpe/Leon-Garcia per momenti: rho = E[x^2] / E[|x|]^2 determina alpha,
-    poi beta = sqrt(E[x^2]) * sqrt(Gamma(1/a)/Gamma(3/a)).
+    Sharifi/Leon-Garcia moment matching: rho = E[x^2] / E[|x|]^2 determines
+    alpha, then beta = sqrt(E[x^2]) * sqrt(Gamma(1/a)/Gamma(3/a)).
     """
     m2 = np.mean(blk * blk, axis=1)
     m1 = np.mean(np.abs(blk), axis=1)
@@ -151,16 +149,16 @@ def _ggd_features_blocks(blk: np.ndarray):
 
 
 def _aggd_features_blocks(blk: np.ndarray):
-    """(gamma, beta_l, beta_r, eta) per blocco da una AGGD a moda nulla.
+    """(gamma, beta_l, beta_r, eta) per block from a zero-mode AGGD.
 
-    Lasmar/Stitou/Berthoumieu per momenti:
+    Lasmar/Stitou/Berthoumieu moment matching:
         sigma_l^2 = E[x^2 | x < 0],  sigma_r^2 = E[x^2 | x >= 0]
         gamma_hat = sigma_l / sigma_r
         r_hat     = E[|x|]^2 / E[x^2]
         R_hat     = r_hat (gamma_hat^3 + 1)(gamma_hat + 1) / (gamma_hat^2 + 1)^2
-    e R_hat = Gamma(2/g)^2 / (Gamma(1/g) Gamma(3/g)) da invertire in g.
-    Poi beta_l = sigma_l sqrt(Gamma(1/g)/Gamma(3/g)), idem per beta_r, e
-        eta = (beta_r - beta_l) Gamma(2/g) / Gamma(1/g)      (formula (8))
+    and R_hat = Gamma(2/g)^2 / (Gamma(1/g) Gamma(3/g)) is inverted for g.
+    Then beta_l = sigma_l sqrt(Gamma(1/g)/Gamma(3/g)), likewise beta_r, and
+        eta = (beta_r - beta_l) Gamma(2/g) / Gamma(1/g)      (equation (8))
     """
     neg = blk < 0
     sq = blk * blk
@@ -186,11 +184,11 @@ def _aggd_features_blocks(blk: np.ndarray):
 
 
 # --------------------------------------------------------------------------
-# Feature per patch: 18 per scala
+# Per-patch features: 18 per scale
 # --------------------------------------------------------------------------
 
-#: prodotti di coppie adiacenti, come nell'articolo:
-#: orizzontale, verticale, diagonale principale, diagonale secondaria
+#: products of adjacent pairs, as in the paper:
+#: horizontal, vertical, main diagonal, secondary diagonal
 _SHIFTS = ((0, 1), (1, 0), (1, 1), (1, -1))
 
 FEATURE_NAMES_PER_SCALE = ["ggd_alpha", "ggd_beta"] + [
@@ -207,7 +205,7 @@ N_FEATURES = 36
 
 
 def _shifted_product(m: np.ndarray, di: int, dj: int) -> np.ndarray:
-    """m(i,j) * m(i+di, j+dj), con estensione a riflessione dei bordi."""
+    """m(i,j) * m(i+di, j+dj), with reflective boundary extension."""
     h, w = m.shape
     mp = np.pad(m, 1, mode="reflect")
     return m * mp[1 + di : 1 + di + h, 1 + dj : 1 + dj + w]
@@ -221,22 +219,21 @@ def scale_features(
     body: np.ndarray | None = None,
     body_min: float = 0.90,
 ):
-    """Feature a una scala.
+    """Features at one scale.
 
-    Ritorna (feat, delta, valid):
-      feat  (n_patch, 18)  le 18 feature per patch
-      delta (n_patch,)     nitidezza di patch, somma di sigma (formula (4))
-      valid (n_patch,)     ammissibilita' del dominio (vedi sotto)
+    Returns (feat, delta, valid):
+      feat  (n_patch, 18)  the 18 features per patch
+      delta (n_patch,)     patch sharpness, sum of sigma (equation (4))
+      valid (n_patch,)     domain admissibility (see below)
 
-    Il dominio ha due requisiti asimmetrici, per la ragione spiegata in
-    docs/01-proposta.md 2.3:
+    The domain has two asymmetric requirements:
 
-      * FOV al 100%: un solo pixel di riempimento fuori campo e' fatale,
-        perche' e' una costante artificiale (-3024 HU sulle GE) che azzera la
-        varianza locale e falsa la statistica.
-      * corpo a una frazione dichiarata `body_min`: qualche pixel d'aria al
-        confine cutaneo e' anatomia reale, non un artefatto, e escluderlo
-        eliminerebbe tutte le patch di superficie.
+      * field of view at 100%: a single out-of-field padding pixel is fatal,
+        because it is an artificial constant (-3024 HU on GE) that zeroes the
+        local variance and corrupts the statistics.
+      * body at a declared fraction `body_min`: a few air pixels at the skin
+        boundary are real anatomy, not an artefact, and excluding them would
+        remove every surface patch.
     """
     m, sigma = mscn(img, C=C)
     blk_m = _blocks(m, P)
@@ -258,13 +255,13 @@ def scale_features(
 
 
 def downscale(img: np.ndarray) -> np.ndarray:
-    """Filtro passa-basso (stesso kernel) e decimazione 2:1."""
+    """Low-pass filter (same kernel) and 2:1 decimation."""
     return _sepconv(np.asarray(img, dtype=np.float64))[::2, ::2]
 
 
 def downscale_mask(mask: np.ndarray) -> np.ndarray:
-    """Decimazione della maschera per erosione: la patch di scala 2 e' valida
-    solo se tutti i quattro pixel originali corrispondenti lo sono."""
+    """Mask decimation by erosion: a second-scale pixel is valid only if all
+    four corresponding original pixels are."""
     m = mask.astype(bool)
     h, w = m.shape
     h2, w2 = h // 2 * 2, w // 2 * 2
@@ -281,31 +278,31 @@ def patch_features(
     body_min: float = 0.90,
     p: float | None = None,
 ):
-    """36 feature per patch, due scale.
+    """36 features per patch, two scales.
 
-    Parametri
-    ---------
-    img  : mappa di luminanza sulla scala 0-255 (float, non quantizzata)
-    P    : lato della patch alla prima scala; alla seconda e' P/2
-    C    : costante di stabilizzazione MSCN
-    fov  : campo ricostruito, requisito al 100%
-    body : maschera del corpo, requisito alla frazione `body_min`
-    p    : se dato, applica la selezione per nitidezza delta > p * max(delta)
-           fra le patch valide.  In valutazione va lasciato None, come
-           prescrive l'articolo.
+    Parameters
+    ----------
+    img  : luminance map on the 0-255 scale (float, not quantised)
+    P    : patch side at the first scale; P/2 at the second
+    C    : MSCN stabilising constant
+    fov  : reconstructed field of view, required at 100%
+    body : body mask, required at fraction `body_min`
+    p    : if given, applies sharpness selection delta > p * max(delta) among
+           valid patches. At scoring time it must be None, as the paper
+           prescribes.
 
-    Ritorna (feat, keep) con feat (n_patch, 36) e keep (n_patch,) booleano.
+    Returns a PatchFeatures.
     """
     if P % 2:
-        raise ValueError("P deve essere pari per ottenere P/2 alla seconda scala")
+        raise ValueError("P must be even to obtain P/2 at the second scale")
     f1, delta, v1 = scale_features(img, P, C, fov, body, body_min)
     img2 = downscale(img)
     fov2 = None if fov is None else downscale_mask(fov)
     body2 = None if body is None else downscale_mask(body)
     f2, _, v2 = scale_features(img2, P // 2, C, fov2, body2, body_min)
 
-    # le due griglie hanno lo stesso numero di patch per costruzione, ma le
-    # dimensioni dispari possono far perdere una riga o colonna: tronchiamo
+    # the two grids have the same number of patches by construction, but odd
+    # sizes can lose a row or column: truncate to the common grid
     nh1, nw1 = img.shape[0] // P, img.shape[1] // P
     nh2, nw2 = img2.shape[0] // (P // 2), img2.shape[1] // (P // 2)
     nh, nw = min(nh1, nh2), min(nw1, nw2)
@@ -330,12 +327,12 @@ def patch_features(
 
 @dataclass(frozen=True)
 class PatchFeatures:
-    """Feature per patch di una slice, con i due livelli di ammissibilita'.
+    """Per-patch features of one slice, with two admissibility levels.
 
     feat  (n_patch, 36)
-    delta (n_patch,)      nitidezza di patch, formula (4)
-    valid (n_patch,)      dentro il dominio (FOV, corpo) e finita
-    keep  (n_patch,)      valid, piu' la selezione per nitidezza se richiesta
+    delta (n_patch,)      patch sharpness, equation (4)
+    valid (n_patch,)      inside the domain (field of view, body) and finite
+    keep  (n_patch,)      valid, plus sharpness selection when requested
     """
 
     feat: np.ndarray

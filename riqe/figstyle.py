@@ -1,44 +1,43 @@
-"""Stile delle figure, con le regole seguite dichiarate.
+"""Figure style, with the rules it follows stated explicitly.
 
-La tavolozza e' l'istanza di riferimento validata: gli slot sono assegnati
-**in ordine fisso, mai ciclati**.  Le figure dell'articolo sono per la stampa,
-quindi solo modalita' chiara.
+The palette is a validated reference instance: slots are assigned **in fixed
+order, never cycled**. Figures are for print, so light mode only.
 
-Regole rispettate, non negoziabili:
+Rules followed:
 
-  * mai due assi y nella stessa figura.  Quando servono due grandezze di scala
-    diversa sullo stesso asse x -- il caso della figura principale, punteggio
-    e ritenzione del segnale -- si usano **due pannelli impilati che
-    condividono la x**, non un secondo asse.
-  * l'identita' di una serie non e' mai affidata al solo colore: ogni serie
-    porta anche tratteggio e marcatore propri, piu' etichetta diretta quando
-    le serie sono poche.  Serve ai lettori con deficit di visione dei colori e
-    alla stampa in bianco e nero.
-  * griglia e assi recessivi, marcatori sottili, nessun numero su ogni punto.
-  * sequenziale = una sola tinta chiaro->scuro; divergente = due tinte con
-    grigio neutro al centro.  Mai arcobaleno.
+  * never two y axes in one figure. When two quantities of different scale
+    share an x axis -- the main figure, score against signal retention --
+    **two stacked panels sharing x** are used, not a secondary axis.
+  * series identity is never carried by colour alone: every series also has
+    its own dash pattern and marker, plus a direct label when series are few.
+    This serves readers with colour-vision deficiency and black-and-white
+    printing.
+  * recessive grid and axes, thin markers, no number on every point.
+  * sequential = one hue light->dark; diverging = two hues with a neutral grey
+    midpoint. Never a rainbow.
 
-La tavolozza categorica supera le soglie CVD sulla lista di coppie
-**adiacenti** fino a cinque slot; oltre i tre slot non e' valida per forme a
-coppie-tutte (dispersione, bolle), dove si accorpa in "altro" o si sfaccetta.
+The categorical palette passes colour-vision-deficiency thresholds on the
+list of **adjacent** pairs up to five slots; beyond three slots it is not
+valid for all-pairs forms (scatter, bubbles), which fold into "other" or
+facet instead.
 """
 
 from __future__ import annotations
 
-#: tavolozza categorica, ordine fisso
+#: categorical palette, fixed order
 SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4",
           "#008300", "#4a3aa7", "#e34948")
-#: codifica secondaria, appaiata agli slot
+#: secondary encoding, paired with the slots
 DASHES = ((), (5, 2), (1, 1.6), (7, 2, 1.5, 2), (3, 1.5, 1, 1.5),
           (6, 3), (2, 2, 6, 2), (9, 2))
 MARKERS = ("o", "s", "^", "D", "v", "P", "X", "*")
 
-#: rampa sequenziale a una tinta (blu), chiaro -> scuro
+#: one-hue sequential ramp (blue), light -> dark
 SEQUENTIAL = ("#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b")
-#: divergente, poli caldo/freddo con grigio neutro al centro
+#: diverging, warm/cool poles with a neutral grey midpoint
 DIVERGING = ("#0d366b", "#256abf", "#86b6ef", "#f0efec", "#f19b9a", "#e34948", "#8f2322")
 
-SURFACE = "#ffffff"  # bianco: le figure sono per la stampa
+SURFACE = "#ffffff"  # white: figures are for print
 INK = "#0b0b0b"
 INK_2 = "#52514e"
 INK_MUTED = "#8a8880"
@@ -46,7 +45,7 @@ GRID = "#e3e2de"
 
 
 def apply(mpl) -> None:
-    """Applica lo stile a matplotlib."""
+    """Apply the style to matplotlib."""
     mpl.rcParams.update({
         "figure.facecolor": SURFACE,
         "axes.facecolor": SURFACE,
@@ -81,7 +80,7 @@ def apply(mpl) -> None:
 
 
 def style_for(i: int) -> dict:
-    """Colore, tratteggio e marcatore dello slot i, in ordine fisso."""
+    """Colour, dash pattern and marker of slot i, in fixed order."""
     j = i % len(SERIES)
     d = DASHES[j]
     out = {"color": SERIES[j], "marker": MARKERS[j]}
