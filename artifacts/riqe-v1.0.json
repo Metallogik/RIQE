@@ -38504,7 +38504,7 @@
    "nss.py": "4ea83a96ad3b09a61a3f4ca1f642723776e9bb6afa8673b21290ed1eb41e1d31",
    "tcia.py": "4d2e03aa059454ba74a1ce1d8cb21eac9070500c46e9e7e04e7ad164fe0050ca"
   },
-  "git_commit": "c2aea1fba02c54c7c60720f11a6d5410957610df-dirty",
+  "git_commit": "9c67c31b437a5aa45313fbbfa092b93dd2f04597",
   "python": "3.12.3",
   "numpy": "2.5.3",
   "scipy": "1.18.1",
