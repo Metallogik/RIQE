@@ -65,7 +65,7 @@ def t_detection() -> None:
         ab = g[~g.cell.str.contains("CHEST")]
         rows.append(f"Gaussian blur, $\\sigma={sp:g}$ px & {pct((ch.score > ch.base).mean())} & "
                     f"{pct((ab.score > ab.base).mean())} \\\\")
-    body = (r"""\begin{table}[t]
+    body = (r"""\begin{table}[tbp]
 \centering
 \caption{Degradation detection on the held-out test split (40 patients). Percentage of
 cases in which the degraded image receives a worse score than its source; 100\% is
@@ -97,7 +97,7 @@ def t_overfiltering() -> None:
         cells = " & ".join(f"{100 * fail.loc[n, l]:.0f} \\,({m(f'{med.loc[n, l]:+.2f}')})" for l in lv)
         rows.append(f"{NICE[n]} & {cells} \\\\")
     tot = 100 * d["failure"].mean()
-    body = (r"""\begin{table}[t]
+    body = (r"""\begin{table}[tbp]
 \centering
 \caption{Overfiltering, form 1: filtering a full-dose image cannot add information, yet
 the filtered image scores better than the original in the percentage of cases shown
@@ -133,11 +133,11 @@ def t_lesions() -> None:
         cells = []
         for l in lv:
             h = g[g.target_residual_hu == l]
-            cells.append(f"{100 * h.pref.mean():.0f} / {h.retention_matched.median():.2f}")
+            cells.append(f"{100 * h.pref.mean():.0f} / {h.retention_matched.median():.2f}".replace("-0.00", "0.00"))
         rows.append(f"{NICE[n]} & " + " & ".join(cells) + r" \\")
     ns = int(f.slice_path.nunique())
     ntot = int(d.slice_path.nunique())
-    body = (r"""\begin{table}[t]
+    body = (r"""\begin{table}[tbp]
 \centering
 \caption{Metric preference against lesion signal. Substrate: """ + str(ntot) + r""" held-out
 full-dose abdominal slices (""" + str(ns) + r""" with room for the 4\,mm lesions) plus FBP-like noise at the level measured between real
@@ -182,7 +182,7 @@ def t_stratification() -> None:
     d = pd.concat([d[d.axis == "dose"], d[d.axis != "dose"].sort_values("eta")])
     rows = [f"{L(r.contrast)} & {r.n_A} / {r.n_B} & {r.D_obs:.2f} & {r.null_median:.2f} & "
             f"{r.eta:.2f} \\\\" for r in d.itertuples()]
-    body = (r"""\begin{table}[t]
+    body = (r"""\begin{table}[tbp]
 \centering
 \caption{Divergence between sub-models fitted on two groups of patients (fitting split).
 $D$ uses the same functional form as the score. Null: median of 200 patient-level
@@ -217,11 +217,12 @@ def t_baselines() -> None:
     def ci(x):
         return m(f"{x['spearman']:+.2f} [{x['spearman_ci95'][0]:+.2f}, {x['spearman_ci95'][1]:+.2f}]")
 
-    body = (r"""\begin{table}[t]
+    body = (r"""\begin{table}[tbp]
 \centering
 \caption{The same code fitted on CT (RIQE) and on """ + str(s5["photo_corpus"]["n_images"]) +
             r""" CC0 natural photographs, scoring the same held-out CT images. Last row: rank
-correlation with the mean score of five radiologists on the 1000 LDCTIQAC 2023 images
+correlation with the mean score of five radiologists on the 938 scoreable LDCTIQAC 2023
+training images
 (negative is the correct sign: lower RIQE means closer to the reference).}
 \label{tab:photo}
 \small

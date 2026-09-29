@@ -28,7 +28,7 @@ metrics, which is rewarding an over-filtered image. It does fall into that trap.
 **In one sentence:** RIQE detects degraded CT images well (real dose
 reduction, added noise, blur), but it **must not be used to choose, compare or
 tune a denoiser**. It rewards edge-preserving filters even when they have
-erased much of the signal of a small low-contrast lesion.
+removed half of the signal of a small low-contrast lesion.
 
 Results on the held-out test split (40 patients never used for fitting or model
 selection):
@@ -41,8 +41,8 @@ selection):
 | Gaussian blur σ = 0.5 px / ≥ 1 px, detected | 49.2% chest, 92.5% abdomen / 99–100% |
 | Filtered full-dose images scoring *better* than the unfiltered original | **41.2%** |
 | Images whose score improves when a little noise is added | **82.9%** (preferred level ≈ 5 HU) |
-| Bilateral filter preferred to the unfiltered image, 4 mm +10 HU lesion | 100% of images up to 16 HU residual (70% of the lesion signal left); 50% at 64 HU (22% left) |
-| Gaussian filter preferred to the unfiltered image | never |
+| Bilateral filter preferred to the unfiltered image, 4 mm +10 HU lesion | 100% of images up to 16 HU residual, where only 48% of the lesion signal is left |
+| Gaussian filter preferred to the unfiltered image | never, although it keeps more of the signal (85% at 16 HU) |
 | Rank correlation with 5 radiologists, LDCTIQAC 2023 (1000 images) | Spearman −0.51 [−0.56, −0.46]; the same code fitted on photographs: −0.17 |
 | Same code fitted on 119 CC0 photographs: real reduced dose ranked worse, abdomen | 33.2% |
 | Stability: rank Spearman between bootstrap models | 0.99 |

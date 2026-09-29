@@ -213,13 +213,30 @@ def main() -> int:
         lo = g[g.kind == "low"]["body_sigma_med"].median()
         if np.isfinite(lo):
             noise_by_cell[cell] = float(np.sqrt(max(lo ** 2 - fu ** 2, 1.0)))
-    default_noise = float(np.median(list(noise_by_cell.values()))) if noise_by_cell else 25.0
+    # A cell without real reduced-dose images (GE abdomen) takes the value
+    # measured on the same anatomy. Pooling over all cells would mix in the
+    # chest, whose dose-reduction noise is nine times larger: an earlier
+    # version did exactly that and added 94.9 HU instead of 18.4 HU to the
+    # GE abdominal slices.
+    by_anatomy: dict[str, list[float]] = {}
+    for cell, v in noise_by_cell.items():
+        by_anatomy.setdefault(cell.split("|")[1], []).append(v)
+
+    def noise_for(cell: str) -> float:
+        if cell in noise_by_cell:
+            return noise_by_cell[cell]
+        vals = by_anatomy.get(cell.split("|")[1])
+        if not vals:
+            raise SystemExit(f"no reduced-dose measurement for the anatomy of {cell}")
+        return float(np.median(vals))
+
     print("added noise per cell (sigma HU, from real full vs reduced dose):")
     for k, v in noise_by_cell.items():
         print(f"  {k:26s} {v:6.1f}")
-    print(f"  cells without a real pair: {default_noise:.1f} (median of the others)")
 
-    # test slices: abdomen (homogeneous liver parenchyma), from the TEST split
+    # test slices: abdomen, from the TEST split. Sites are homogeneous soft
+    # tissue at 40-80 HU (see find_homogeneous_sites): in these contrast-enhanced
+    # scans that is mostly muscle, since enhanced liver is near 130 HU
     cand = corpus[(corpus["kind"] == "full") & corpus["keep"]
                   & corpus.patient_id.isin(test_pids)
                   & corpus["body_part"].eq("ABDOMEN")]
@@ -233,7 +250,9 @@ def main() -> int:
         pick = pick.iloc[np.sort(rng.choice(len(pick), args.n_slices, replace=False))]
     print(f"\ntest slices: {len(pick)} (abdomen, TEST split, {pick.patient_id.nunique()} patients)")
 
-    jobs = [(r.path, r.cell, noise_by_cell.get(r.cell, default_noise), args.seed + 977 * i)
+    for cell in sorted(set(pick.cell) - set(noise_by_cell)):
+        print(f"  {cell:26s} {noise_for(cell):6.1f}  (no real pair: value of the same anatomy)")
+    jobs = [(r.path, r.cell, noise_for(r.cell), args.seed + 977 * i)
             for i, r in enumerate(pick.itertuples())]
     spec = Spec(P=P, C=C, p=None)
     t0 = time.time()

@@ -231,9 +231,10 @@ def find_homogeneous_sites(
     sigma_quantile: float = 0.5,
     min_sep_px: float | None = None,
 ):
-    """Sites of homogeneous parenchyma where lesions are inserted.
+    """Sites of homogeneous soft tissue where lesions are inserted.
 
-    Criteria: local mean within `hu_range` (soft tissue / liver parenchyma),
+    Criteria: local mean within `hu_range` (unenhanced soft tissue; on
+    contrast-enhanced scans the liver lies above the default range),
     local standard deviation below the image median, and distance from the
     body boundary of at least one diameter.
     """

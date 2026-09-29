@@ -18,7 +18,8 @@ that assumes the answer and uses it as the target.
 
 REVISED CRITERION, declared as such. The criterion above was blind to the most
 important property -- the ordering of real reduced-dose images -- and selected
-a setting that ranks it correctly in only 38.5% of abdominal validation pairs.
+a setting that ranks it correctly in fewer than half of the abdominal
+validation pairs.
 After inspecting validation data, and before touching the test set, the
 criterion becomes:
 
@@ -310,9 +311,9 @@ def main() -> int:
                       "then bootstrap stability, then patches per slice"),
         "declared_before_run": False,
         "revision_reason": ("the pre-declared criterion ignored real-dose ordering and selected "
-                            "a configuration ordering reduced-dose abdomen correctly in 38.5% "
-                            "of validation pairs; revised after seeing validation data and "
-                            "before using the test set"),
+                            "a configuration ordering reduced-dose abdomen correctly in "
+                            f"{100 * best_o.dose_correct_abdomen:.1f}% of validation pairs; "
+                            "revised after seeing validation data and before using the test set"),
         "any_config_passes_dose": bool(len(passing) > 0),
         "any_safe_config_overfiltering": bool(len(safe) > 0),
         "metrics": {k: (float(best[k]) if k in best else None) for k in cols},
