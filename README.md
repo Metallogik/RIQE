@@ -1,6 +1,6 @@
 # RIQE
 
-**R**eference **I**mage **Q**uality **E**valuator for computed tomography.
+**R**adiology **I**mage **Q**uality **E**valuator, for computed tomography.
 
 RIQE is a NIQE-style no-reference image quality model fitted on CT instead of
 natural photographs. It is released together with its validation, and with
