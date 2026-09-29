@@ -1,21 +1,29 @@
-"""Real-dose test: the score of the reduced-dose image must be worse.
+"""Reduced-dose test: the score of the reduced-dose image must be worse.
 
-For 100 Siemens patients the collection provides the reconstruction of the
-**same** acquisition at a real reduced dose (10% of routine for chest, 25% for
-abdomen), on the same z grid. It is the only test of the battery with native
-rather than synthetic noise texture, and it is the use case the metric exists
-for: low-dose CT.
+For the 100 Siemens patients the collection provides a second reconstruction
+at reduced dose (10% of routine for chest, 25% for abdomen). The reduced-dose
+data were **simulated** by the data providers, by inserting noise into the
+projection data of the same full-dose scan (Moen et al., Med Phys 2021), and
+reconstructed on the same z grid. The noise texture is therefore that of the
+reconstruction chain rather than of an image-domain model, but it is not an
+independent acquisition.
 
-Computed from the feature cache without re-reading DICOM files: the cache
-holds, for every kept slice of both doses, the patches inside the domain,
-which is exactly what scoring needs (sharpness selection is not applied at
-scoring time).
+Pairing and domain. Every kept full-dose slice is paired with the
+reduced-dose slice of the same patient at identical table position; the
+reduced-dose series is not subsampled on its own. Both images of a pair are
+scored on the **full-dose masks**: the body mask of a 10%-dose chest image
+fragments under noise, and a domain that changes with dose would confound
+the effect of dose with that of the domain. The reduced-dose features live in
+a separate cache built with those masks (scripts/cache_features.py
+--paired-low).
 
 Added to the battery after inspecting validation data: without it, the
 hyperparameter criterion was blind to the most important property.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -24,27 +32,38 @@ from .cache import FeatureCache
 from .extract import MIN_PATCHES_FOR_SCORE
 from .model import RCOND, MVGModel, mahalanobis_mixed
 
+_ROOT = Path(__file__).resolve().parents[1]
 
-def dose_pairs(corpus: pd.DataFrame, patient_ids) -> pd.DataFrame:
-    """(full dose, reduced dose) pairs of kept slices at identical z."""
-    k = corpus[corpus["keep"] & corpus.patient_id.isin(set(patient_ids))]
+
+def low_cache_dir(P: int, C: float) -> Path:
+    """Cache of the reduced-dose slices paired to kept full-dose slices,
+    extracted on the full-dose masks."""
+    return _ROOT / "data" / "features_lowpaired" / f"P{P}_C{C:g}"
+
+
+def dose_pairs(corpus: pd.DataFrame, patient_ids=None) -> pd.DataFrame:
+    """Every kept full-dose slice with the reduced-dose slice of the same
+    patient at identical z (tolerance 0.01 mm)."""
+    c = corpus if patient_ids is None else corpus[corpus.patient_id.isin(set(patient_ids))]
+    full = c[(c["kind"] == "full") & c["keep"]]
+    low = c[c["kind"] == "low"]
+    low_by_patient = {pid: g for pid, g in low.groupby("patient_id")}
     rows = []
-    for pid, g in k.groupby("patient_id"):
-        lo = g[g["kind"] == "low"]
-        fu = g[g["kind"] == "full"]
-        if lo.empty or fu.empty:
+    for pid, fu in full.groupby("patient_id"):
+        lo = low_by_patient.get(pid)
+        if lo is None or lo.empty:
             continue
-        fz = fu["z"].to_numpy()
-        for r in lo.itertuples():
-            j = int(np.abs(fz - r.z).argmin())
-            if abs(fz[j] - r.z) <= 0.01:
+        lz = lo["z"].to_numpy()
+        for r in fu.itertuples():
+            j = int(np.abs(lz - r.z).argmin())
+            if abs(lz[j] - r.z) <= 0.01:
                 rows.append({
                     "patient_id": pid,
-                    "cell": fu["cell"].iloc[j],
-                    "region": "chest" if "CHEST" in fu["cell"].iloc[j] else "abdomen",
+                    "cell": r.cell,
+                    "region": "chest" if "CHEST" in r.cell else "abdomen",
                     "z": float(r.z),
-                    "path_full": fu["path"].iloc[j],
-                    "path_low": r.path,
+                    "path_full": r.path,
+                    "path_low": lo["path"].iloc[j],
                 })
     return pd.DataFrame(rows)
 
@@ -60,6 +79,13 @@ def image_moments(cache: FeatureCache, paths) -> dict[str, tuple[np.ndarray, np.
             f = f.astype(np.float64)
             out[q] = (f.mean(axis=0), np.cov(f, rowvar=False))
     return out
+
+
+def pair_moments(full_cache: FeatureCache, low_cache: FeatureCache, pairs: pd.DataFrame) -> dict:
+    """Moments of both members of every pair, each from its own cache."""
+    m = image_moments(full_cache, list(pairs["path_full"]))
+    m.update(image_moments(low_cache, list(pairs["path_low"])))
+    return m
 
 
 def dose_ordering(model: MVGModel, pairs: pd.DataFrame, moments: dict) -> pd.DataFrame:
@@ -84,6 +110,7 @@ def summarize(d: pd.DataFrame) -> dict:
     for reg in ("chest", "abdomen"):
         s = ok[ok["region"] == reg]
         out[f"n_{reg}"] = int(len(s))
+        out[f"n_patients_{reg}"] = int(s["patient_id"].nunique()) if len(s) else 0
         out[f"correct_{reg}"] = float((s["score_low"] > s["score_full"]).mean()) if len(s) else np.nan
     vals = [out[f"correct_{r}"] for r in ("chest", "abdomen") if np.isfinite(out[f"correct_{r}"])]
     out["correct_min"] = float(min(vals)) if vals else np.nan

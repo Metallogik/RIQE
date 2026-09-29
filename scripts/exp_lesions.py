@@ -12,23 +12,36 @@ The question: **does RIQE keep improving in the region where signal fidelity
 has already collapsed?** If so, the metric rewards filtering that has already
 erased low-contrast lesions, and this must be stated plainly.
 
-Why three measures and not one. The d' of the matched filter with known
-template and location is almost insensitive to smoothing -- a known property
-of the near-optimal observer, verified here -- and used alone it would
-suggest that overfiltering does no harm. Loss of signal amplitude is what
-erases a lesion to the eye. The two diverge, and the divergence is
-information, not noise: it is reported.
+Why three measures and not one. The matched filter with known template and
+location integrates over the whole lesion and is little affected by
+smoothing that preserves the integral, so on its own it would suggest that
+filtering does no harm. Loss of amplitude is closer to what reduces the
+conspicuity of a small lesion to a human reader, who does not integrate
+ideally. The measures can diverge, and the divergence is reported.
 
-Substrate: full-dose slices (treated as low-noise truth), plus a realisation
-of FBP-like noise at the level measured from the real full-dose / reduced-dose
-contrast of the same protocol cell. The variance of d' is taken **over noise
-realisations at the same site**, so the anatomical term cancels exactly.
+Definitions, per lesion site s and noise realisation k, with the background
+slice fixed, the same noise realisation added with and without the lesion,
+and the filter applied at the same strength (calibrated once on the noisy
+slice without lesions):
+  A_sk = t . f(b + n_k + l)   (signal present),  B_sk = t . f(b + n_k)   (absent),
+where t is the zero-mean, unit-norm disc template around the site and f the
+filter. Then
+  retention = mean over s, k of (A_sk - B_sk) / (t . l_s),
+  d'_s      = mean_k (A_sk - B_sk) / sd_k (B_sk),   d' = mean over sites.
+Holding the background fixed removes anatomical variability from the
+ensemble; it does not remove the interaction between anatomy and a
+non-linear filter. The matched filter is a model observer without an eye
+filter or internal noise, not calibrated to human performance.
+
+Substrate: full-dose slices plus FBP-like noise at the level measured
+between full-dose and reduced-dose (projection-domain simulated) abdominal
+images.
 
 Everything is reported per denoiser as well as pooled: pooling over denoisers
 averages a filter the metric rejects (Gaussian) with one it prefers
 (bilateral), and the pooled verdict hides the difference.
 
-    .venv/bin/python scripts/exp_lesions.py --n-slices 24 --realizations 16
+    .venv/bin/python scripts/exp_lesions.py --n-slices 24 --realizations 64
 """
 
 from __future__ import annotations
@@ -77,11 +90,15 @@ def _init(cfg):
 
 
 def _score(hu, pad, masks, spec, model):
+    """RIQE score, and the ablation without the image covariance."""
     pf = features_from_hu(hu, pad, spec, fitting=False, masks=masks)
     f = pf.feat[pf.valid]
     if f.shape[0] < MIN_PATCHES_FOR_SCORE:
-        return np.nan
-    return mahalanobis_mixed(model.nu, model.sigma, f.mean(axis=0), np.cov(f, rowvar=False), RCOND)
+        return np.nan, np.nan
+    mu = f.mean(axis=0).astype(np.float64)
+    dv = np.asarray(model.nu, dtype=np.float64) - mu
+    ref = float(np.sqrt(max(dv @ _G["pinv_ref"] @ dv, 0.0)))
+    return mahalanobis_mixed(model.nu, model.sigma, mu, np.cov(f, rowvar=False), RCOND), ref
 
 
 def _one(job):
@@ -129,7 +146,7 @@ def _one(job):
     for cname, filt, lvl in conditions:
         # RIQE score of the filtered noisy image, without lesions
         img = filt(noisy0) if filt is not None else noisy0
-        sc = _score(img, pad, masks, spec, model)
+        sc, sc_ref = _score(img, pad, masks, spec, model)
         res_hu = dg.residual_std(noisy0, img, body) if filt is not None else 0.0
 
         # template responses over K realisations, with and without lesions
@@ -170,6 +187,7 @@ def _one(job):
                 "noise_sigma_hu": noise_sigma,
                 "denoiser": cname, "target_residual_hu": lvl, "residual_hu": res_hu,
                 "riqe": sc,
+                "riqe_refcov": sc_ref,
                 "diameter_mm": g["dmm"], "contrast_hu": g["contrast"], "n_sites": len(g["sites"]),
                 "dprime": float(np.nanmean(dp)),
                 "retention_matched": float(np.nanmean(delta) / ref) if ref else np.nan,
@@ -181,7 +199,7 @@ def _one(job):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n-slices", type=int, default=24)
-    ap.add_argument("--realizations", type=int, default=16)
+    ap.add_argument("--realizations", type=int, default=64)
     ap.add_argument("--workers", type=int, default=24)
     ap.add_argument("--P", type=int, default=None)
     ap.add_argument("--C", type=float, default=None)
@@ -204,7 +222,7 @@ def main() -> int:
     fit = corpus[(corpus["kind"] == "full") & corpus["keep"] & corpus.patient_id.isin(fit_pids)]
     model = cache.fit(list(fit["path"]), p, n_patients=fit.patient_id.nunique())
 
-    # noise level to add: measured from the real full-dose / reduced-dose
+    # noise level to add: measured from the full-dose / reduced-dose
     # contrast of the same cell
     slices = pd.read_parquet(ROOT / "corpus" / "slices.parquet")
     noise_by_cell = {}
@@ -213,7 +231,7 @@ def main() -> int:
         lo = g[g.kind == "low"]["body_sigma_med"].median()
         if np.isfinite(lo):
             noise_by_cell[cell] = float(np.sqrt(max(lo ** 2 - fu ** 2, 1.0)))
-    # A cell without real reduced-dose images (GE abdomen) takes the value
+    # A cell without reduced-dose images (GE abdomen) takes the value
     # measured on the same anatomy. Pooling over all cells would mix in the
     # chest, whose dose-reduction noise is nine times larger: an earlier
     # version did exactly that and added 94.9 HU instead of 18.4 HU to the
@@ -230,7 +248,7 @@ def main() -> int:
             raise SystemExit(f"no reduced-dose measurement for the anatomy of {cell}")
         return float(np.median(vals))
 
-    print("added noise per cell (sigma HU, from real full vs reduced dose):")
+    print("added noise per cell (sigma HU, from full vs reduced dose):")
     for k, v in noise_by_cell.items():
         print(f"  {k:26s} {v:6.1f}")
 
@@ -251,7 +269,7 @@ def main() -> int:
     print(f"\ntest slices: {len(pick)} (abdomen, TEST split, {pick.patient_id.nunique()} patients)")
 
     for cell in sorted(set(pick.cell) - set(noise_by_cell)):
-        print(f"  {cell:26s} {noise_for(cell):6.1f}  (no real pair: value of the same anatomy)")
+        print(f"  {cell:26s} {noise_for(cell):6.1f}  (no reduced-dose pair: value of the same anatomy)")
     jobs = [(r.path, r.cell, noise_for(r.cell), args.seed + 977 * i)
             for i, r in enumerate(pick.itertuples())]
     spec = Spec(P=P, C=C, p=None)
@@ -259,7 +277,8 @@ def main() -> int:
     rows = []
     with cf.ProcessPoolExecutor(
         args.workers, initializer=_init,
-        initargs=({"spec": spec, "model": model, "K": args.realizations},)
+        initargs=({"spec": spec, "model": model, "K": args.realizations,
+                   "pinv_ref": np.linalg.pinv(model.sigma, rcond=RCOND)},)
     ) as ex:
         for i, rr in enumerate(ex.map(_one, jobs, chunksize=1), 1):
             rows += rr

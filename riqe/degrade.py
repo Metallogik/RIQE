@@ -30,8 +30,8 @@ from skimage.restoration import (
 NOISE_SIGMAS_HU = (5.0, 10.0, 20.0, 40.0, 80.0)
 BLUR_SIGMAS_PX = (0.5, 1.0, 1.5, 2.0, 3.0)
 
-#: fine ladder starting at zero, for form 3 of the overfiltering test: used to
-#: look for a minimum of the score at non-zero noise
+#: fine ladder starting at zero, for form 3 of the filtered-preference test: noise
+#: at fixed levels, each compared with the noise floor
 NOISE_FINE_HU = (0.0, 1.0, 2.0, 3.0, 5.0, 7.5, 10.0, 15.0, 20.0, 30.0, 45.0, 65.0, 90.0)
 
 

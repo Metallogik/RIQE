@@ -40,19 +40,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from riqe.bank import from_dict, render  # noqa: E402
 from riqe.dicomio import read_hu  # noqa: E402
-from riqe.extract import MIN_PATCHES_FOR_SCORE, Spec, features_from_hu, masks_for  # noqa: E402
+from riqe import niqecfg  # noqa: E402
+from riqe.extract import MIN_PATCHES_FOR_SCORE, Spec, features_from_hu, luminance, masks_for  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
 _CONFIGS: list[tuple[int, float]] = []
+_NIQE = False
+
+#: the parameters published for NIQE, see riqe/niqecfg.py
+NIQE_CONFIG = (niqecfg.P, niqecfg.C)
 
 
-def _init(configs) -> None:
-    global _CONFIGS
+def _init(configs, niqe: bool = False) -> None:
+    global _CONFIGS, _NIQE
     _CONFIGS = [tuple(c) for c in configs]
+    _NIQE = niqe
 
 
 def _moments(hu, pad, masks, P, C):
+    if _NIQE:
+        return niqecfg.image_moments(luminance(hu, Spec(P=P, C=C, p=None, use_masks=False)))
     pf = features_from_hu(hu, pad, Spec(P=P, C=C, p=None), fitting=False, masks=masks)
     f = pf.feat[pf.valid]
     if f.shape[0] < MIN_PATCHES_FOR_SCORE:
@@ -69,9 +77,13 @@ def _one(rec: dict):
     if "low" in rec:
         sources.append(("low", rec["low"]["path"], rec["low"]["entries"]))
 
+    masks = None
     for src, path, entries in sources:
         hu, pad, _ = read_hu(str(ROOT / path))
-        masks = masks_for(hu, pad)
+        if masks is None:
+            # masks of the full-dose slice, used for its reduced-dose
+            # counterpart as well (same anatomy, same position)
+            masks = masks_for(hu, pad)
         for ed in entries:
             e = from_dict(ed)
             img = render(e, hu)
@@ -107,16 +119,21 @@ def main() -> int:
     ap.add_argument("--C", default="1.0,0.5,0.25,0.1")
     ap.add_argument("--workers", type=int, default=24)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--niqe-config", action="store_true",
+                    help="score with the published NIQE parameters (P=96, C=1, no masks)")
     args = ap.parse_args()
 
     bank = json.load(open(args.bank))
     configs = [(int(P), float(C)) for P in args.P.split(",") for C in args.C.split(",")]
+    if args.niqe_config:
+        configs = [NIQE_CONFIG]
     print(f"bank: {bank['n_slices']} slices, {bank['n_entries']} images; "
           f"{len(configs)} (P, C) settings")
 
     t0 = time.time()
     recs = []
-    with cf.ProcessPoolExecutor(args.workers, initializer=_init, initargs=(configs,)) as ex:
+    with cf.ProcessPoolExecutor(args.workers, initializer=_init,
+                                initargs=(configs, args.niqe_config)) as ex:
         for i, r in enumerate(ex.map(_one, bank["slices"], chunksize=1), 1):
             recs.append(r)
             if i % 10 == 0:
@@ -138,7 +155,8 @@ def main() -> int:
             NU[i] = r["nu"]
             SG[i] = r["sigma"]
 
-    out = Path(args.out or (Path(args.bank).with_suffix("").as_posix() + "_moments.npz"))
+    suffix = "_moments_niqecfg.npz" if args.niqe_config else "_moments.npz"
+    out = Path(args.out or (Path(args.bank).with_suffix("").as_posix() + suffix))
     np.savez_compressed(
         out,
         nu=NU,

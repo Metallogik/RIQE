@@ -9,15 +9,16 @@ everything needed to rebuild it from public data.
 NIQE (Mittal, Soundararajan and Bovik, IEEE SPL 20(3):209–212, 2013) measures
 how far an image deviates from the statistical regularity of a reference
 corpus. Its official reference model was fitted on 125 natural photographs, so
-on a CT image it returns a number with no clinical meaning. A 2025 study
+on a CT image it returns a number whose relation to CT quality is unknown. A 2025 study
 (*Computers* 14(1):18) fitted NIQE on CT but did not publish the model
 parameters, the code or the HU-to-luminance conversion. RIQE publishes all
 three and tests the result.
 
 The model file itself is simple: a 36-dimensional mean and a 36×36 covariance.
-The contribution is **the validation**. It checks whether the model orders real
-degradations correctly, and whether it falls into the usual trap of these
-metrics, which is rewarding an over-filtered image. It does fall into that trap.
+The contribution is **the validation**. It checks two things: whether the
+model ranks a degraded image worse than its source, and whether its
+preferences among filtered images follow the signal of small low-contrast
+lesions. The first holds; the second does not.
 
 > **The RIQE score is a distance from the declared reference model, not a
 > measure of diagnostic quality.** The model does not know what a lesion is.
@@ -25,38 +26,42 @@ metrics, which is rewarding an over-filtered image. It does fall into that trap.
 
 ## What it is good for, and what it is not
 
-**In one sentence:** RIQE detects degraded CT images well (real dose
-reduction, added noise, blur), but it **must not be used to choose, compare or
-tune a denoiser**. It rewards edge-preserving filters even when they have
-removed half of the signal of a small low-contrast lesion.
+**In one sentence:** RIQE ranks a degraded CT image worse than its source
+(simulated dose reduction, added noise, blur), but it **should not be the sole
+criterion to choose, compare or tune a denoiser**. It prefers an
+edge-preserving filter even at strengths that leave half of the signal of a
+small low-contrast lesion, and does not prefer linear smoothing that keeps
+more.
 
 Results on the held-out test split (40 patients never used for fitting or model
-selection):
+selection). Intervals are 95% bootstrap intervals over patients.
 
 | Test | Result |
 |---|---|
-| Real reduced-dose image ranked worse than full dose, same slice | chest 100% (12 pairs), abdomen 96.9% (223 pairs) |
+| Simulated reduced-dose image ranked worse than full dose, same slice | chest 240/240 pairs (10 patients); abdomen 95.8% [91.2, 99.6] of 240 pairs (10 patients) |
 | Noise added at +5% / +10% of the native noise, detected (chest / abdomen) | 85.0 / 89.2%, 92.5 / 98.3% |
 | Noise added at ≥ +20% of the native noise, detected | 97.5–100% |
 | Gaussian blur σ = 0.5 px / ≥ 1 px, detected | 49.2% chest, 92.5% abdomen / 99–100% |
-| Filtered full-dose images scoring *better* than the unfiltered original | **41.2%** |
-| Images whose score improves when a little noise is added | **82.9%** (preferred level ≈ 5 HU) |
-| Bilateral filter preferred to the unfiltered image, 4 mm +10 HU lesion | 100% of images up to 16 HU residual, where only 48% of the lesion signal is left |
-| Gaussian filter preferred to the unfiltered image | never, although it keeps more of the signal (85% at 16 HU) |
-| Rank correlation with 5 radiologists, LDCTIQAC 2023 (1000 images) | Spearman −0.51 [−0.56, −0.46]; the same code fitted on photographs: −0.17 |
-| Same code fitted on 119 CC0 photographs: real reduced dose ranked worse, abdomen | 33.2% |
+| Filtered full-dose images scoring *better* than the unfiltered original | 41.2% [34.8, 48.3]; 27.8% counting only changes > 0.05 |
+| Bilateral filter preferred to the unfiltered image, 4 mm +10 HU lesion (18 slices, 64 noise realisations) | 18/18 images up to 16 HU residual, where 48% [45, 53] of the lesion signal is left |
+| Gaussian filter preferred to the unfiltered image | never, although it keeps more of the signal (85% at 16 HU) and a higher d′ (bilateral − Gaussian at 16 HU: −0.063 [−0.079, −0.047]) |
+| Rank correlation with radiologists, LDCTIQAC 2023 (1000 images from 69 source slices) | within one source slice: median −0.47 [−0.54, −0.30]; pooled: −0.24 [−0.32, −0.17] |
+| Same code fitted on 119 CC0 photographs, RIQE settings: reduced dose ranked worse, abdomen | 31.2% |
+| Same code fitted on the photographs with the NIQE parameters (P = 96, C = 1): reduced dose ranked worse, abdomen | 0% |
 | Stability: rank Spearman between bootstrap models | 0.99 |
-| Refit from the public data with `scripts/verify_model.py` | bit-identical |
+| Refit from the public data with `scripts/verify_model.py` | bit-identical in the recorded environment |
 
 Using RIQE safely:
 
 - Compare scores **only within one acquisition protocol** (same anatomy,
   kernel and slice thickness). Sub-models fitted on different kernels or
-  anatomies diverge by 0.7 to 3.9 times as much as a real dose reduction on
-  the same patients. RIQE is deliberately released as a single model, so
+  anatomies diverge by 0.5 to 2.7 times as much as a simulated dose reduction
+  on the same patients. RIQE is deliberately released as a single model, so
   absolute scores across protocols are not comparable.
-- A worse score flags a degraded image. A **better score after processing does
-  not mean a better image**.
+- Use it for **paired ranking**: an image against a degraded or processed
+  version of the same anatomy. It has not been validated as a stand-alone
+  detector with a threshold on single images.
+- A **better score after processing does not mean a better image**.
 
 ## The model
 
@@ -139,13 +144,15 @@ bash scripts/run_pipeline.sh                    # everything else, resumable
 `run_pipeline.sh` runs the following steps in order:
 
 1. builds the validation bank;
-2. searches the hyperparameters on an inner split of the fitting patients;
+2. searches the hyperparameters on an inner split of the fitting patients,
+   and compares one model per protocol with the single model on that split;
 3. fits the model;
 4. runs the stratification experiment;
 5. builds and scores the test bank;
 6. runs the validation battery, the lesion experiment, the photographic
-   baseline and LDCTIQAC;
-7. finally runs `verify_model.py`, which refits from the downloaded data and
+   baselines and LDCTIQAC;
+7. computes the confidence intervals (`uncertainty.py`);
+8. finally runs `verify_model.py`, which refits from the downloaded data and
    compares the result with the published numbers.
 
 Outputs go to `experiments/`. After that, `scripts/make_tables.py` and
@@ -162,15 +169,27 @@ the final battery.
   pure operations on a per-slice table. The exclusions are counted in
   [corpus/exclusion_report.csv](corpus/exclusion_report.csv). 4,752
   full-dose slices from 198 patients are kept.
+- **Reduced dose is simulated.** The reduced-dose reconstructions in the
+  collection were produced by the data providers by inserting noise into the
+  full-dose projection data (Moen et al., Med Phys 48(2), 2021). They exist
+  for the 100 Siemens patients only (10% of routine dose for chest, 25% for
+  abdomen). Each reduced-dose slice is scored on the masks of the full-dose
+  slice at the same position.
 - **Hyperparameter criterion revised once.** The criterion declared before the
-  search ignored real-dose ordering. It selected P = 32, C = 0.01, p = 0.05,
-  which on the test split ranks reduced-dose abdomen correctly in only 29.9% of
-  pairs. After seeing validation data, and before touching the test split,
-  real-dose ordering was made the first criterion. Both choices are recorded in
-  the model JSON.
-- **Overfiltering definition.** A filtered full-dose image must never score
-  better than its source. This definition was fixed before running and is
-  reported whichever way it went.
+  search ignored reduced-dose ordering. It selected P = 32, C = 0.01, p = 0.05,
+  which on the test split ranks reduced-dose abdomen correctly in only 28.5% of
+  214 scoreable pairs. After seeing validation data, and before touching the
+  test split, reduced-dose ordering was made the first criterion. Both choices
+  are recorded in the model JSON.
+- **Filtered full-dose preference.** The criterion declared first required
+  that a filtered full-dose image never score better than its source. A
+  full-dose image still contains noise, so a preference for light filtering
+  is not by itself an error: the rate is reported as a preference rate, and
+  whether the preferred filtering removes signal is tested with inserted
+  lesions.
+- **Confidence intervals** resample patients (bootstrap, B = 2000), since the
+  slices, pairs and filtered versions of one patient are not independent.
+  LDCTIQAC intervals resample the inferred source slices.
 - **Denoisers:** Gaussian, total variation, bilateral, non-local means and
   wavelet (scikit-image). Their strength is calibrated per image to the same
   residual standard deviation, from 2 to 64 HU. BM3D is not used (GPL).
@@ -192,7 +211,9 @@ the final battery.
 | [riqe/bank.py](riqe/bank.py) | test bank as deterministic recipes rather than pixels |
 | [riqe/cache.py](riqe/cache.py) | feature cache, with the threshold `p` applied downstream |
 | [riqe/dosetest.py](riqe/dosetest.py) | full-dose / reduced-dose pairs matched by position |
-| [riqe/evaluate.py](riqe/evaluate.py) | scoring from stored moments, sign tests, Holm, Kendall's W |
+| [riqe/evaluate.py](riqe/evaluate.py) | scoring from stored moments, sign tests, Holm, Kendall's W, patient-level bootstrap |
+| [riqe/niqecfg.py](riqe/niqecfg.py) | the parameters published for NIQE (P = 96, C = 1, p = 0.75, whole image), for the photographic baseline |
+| [riqe/figstyle.py](riqe/figstyle.py) | figure style |
 | [scripts/](scripts/) | the pipeline above, one script per step |
 | [corpus/](corpus/) | corpus identity: series list, manifest, split, exclusion report, photo manifest |
 | [artifacts/](artifacts/) | the released model |
@@ -202,8 +223,8 @@ the final battery.
 - **pyiqa / IQA-PyTorch is not used.** Its licences (PolyForm Noncommercial,
   NTU S-Lab) are incompatible with a permissive release.
 - **The LIVE pristine model (`modelparameters.mat`) is not used**, not even
-  as a default or a convenience reference. The photographic baseline is a
-  refit of this code on CC0 photographs.
+  as a default or a convenience reference. The photographic baselines are
+  refits of this code on CC0 photographs.
 - **The algorithm is implemented from the paper**, and no LIVE MATLAB code is
   incorporated. The paper is cited as the source of the algorithm.
 - Dependencies are permissively licensed: see

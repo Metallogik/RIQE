@@ -155,3 +155,34 @@ class FeatureCache:
             f, d = self.slice_rows(pp)
             out.append(int((d > p * d.max()).sum()) if (p is not None and f.shape[0]) else f.shape[0])
         return np.asarray(out)
+
+
+class MergedCache:
+    """Several caches seen as one, for fits that mix slices from both, such
+    as the dose anchor: full-dose slices from the main cache, reduced-dose
+    slices from the cache extracted on the full-dose masks.
+
+    A slice present in more than one cache is taken from the **last** one:
+    the main cache also holds the kept reduced-dose slices extracted on their
+    own masks, which the paired cache supersedes."""
+
+    def __init__(self, *caches: FeatureCache):
+        if len({(c.P, c.C) for c in caches}) != 1:
+            raise ValueError("merged caches must share P and C")
+        self.caches = caches
+        self._stats: dict = {}
+
+    P = property(lambda self: self.caches[0].P)
+    C = property(lambda self: self.caches[0].C)
+    n_features = property(lambda self: self.caches[0].n_features)
+
+    def stats(self, p: float | None) -> dict:
+        key = ("all" if p is None else round(float(p), 6))
+        if key not in self._stats:
+            merged: dict = {}
+            for c in self.caches:
+                merged.update(c.stats(p))
+            self._stats[key] = merged
+        return self._stats[key]
+
+    fit_fast = FeatureCache.fit_fast

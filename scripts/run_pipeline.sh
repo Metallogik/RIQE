@@ -2,8 +2,9 @@
 # Runs in sequence everything that follows corpus construction.
 #
 # Prerequisites (see README.md): download_corpus.py, build_slice_table.py,
-# make_corpus.py and cache_features.py have been run, and, for experiment 6,
-# the LDCTIQAC 2023 training set is unpacked in data/ldctiqac/.
+# make_corpus.py, cache_features.py and cache_features.py --paired-low have
+# been run, and, for experiment 6, the LDCTIQAC 2023 training set is unpacked
+# in data/ldctiqac/.
 #
 # Each step writes its own log to logs/, and the pipeline stops at the first
 # error: a step that fails silently would leave the following steps working
@@ -47,6 +48,9 @@ step hparam_search experiments/hparam_choice.json \
   $PY scripts/search_hparams.py --bootstrap 60 --moments \
      experiments/bank_val_inner_moments.npz experiments/bank_val_inner_moments_lowC.npz
 
+step per_protocol experiments/per_protocol.csv \
+  $PY scripts/per_protocol.py --moments experiments/bank_val_inner_moments_lowC.npz
+
 step fit_model artifacts/riqe-v1.0.json \
   $PY scripts/fit_model.py
 
@@ -64,15 +68,21 @@ echo "[$(date +%H:%M:%S)] settings for TEST: P=$PLIST C=$CLIST"
 step moments_test experiments/bank_test_moments.npz \
   $PY scripts/score_bank.py --bank experiments/bank_test.json --workers "$W" --P "$PLIST" --C "$CLIST"
 
+step moments_test_niqecfg experiments/bank_test_moments_niqecfg.npz \
+  $PY scripts/score_bank.py --bank experiments/bank_test.json --workers "$W" --niqe-config
+
 step battery experiments/battery_summary.json \
   $PY scripts/run_battery.py --moments experiments/bank_test_moments.npz --bootstrap 200
 
 step lesions experiments/exp2_form2_summary.json \
-  $PY scripts/exp_lesions.py --n-slices 24 --realizations 16 --workers "$W"
+  $PY scripts/exp_lesions.py --n-slices 24 --realizations 64 --workers "$W"
 
 step photo_baseline experiments/exp5_summary.json \
   $PY scripts/exp5_photo_baseline.py --n-photos 125 --moments experiments/bank_test_moments.npz \
      --workers 16
+
+step photo_sanity experiments/photo_sanity.json \
+  $PY scripts/photo_sanity.py --workers 16
 
 if [ -e data/ldctiqac/LDCTIQAG2023_train/train.json ]; then
   step ldctiqac experiments/exp6_ldctiqac_summary.json \
@@ -80,6 +90,9 @@ if [ -e data/ldctiqac/LDCTIQAG2023_train/train.json ]; then
 else
   echo "[$(date +%H:%M:%S)] skipping ldctiqac: data/ldctiqac/LDCTIQAG2023_train not found"
 fi
+
+step uncertainty experiments/uncertainty.json \
+  $PY scripts/uncertainty.py
 
 step verify artifacts/verify_ok.txt \
   bash -c "$PY scripts/verify_model.py | tee artifacts/verify_ok.txt"

@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """Validation battery, experiments 0-4, on the TEST split only.
 
-  0. REAL DOSE. A real reduced-dose image must score worse than the
-     full-dose image of the same slice: this is the use case.
+  0. REDUCED DOSE. A reduced-dose image must score worse than the full-dose
+     image of the same slice. The reduced-dose reconstructions are simulated
+     by projection-domain noise insertion (Moen et al., Med Phys 2021).
   1. MONOTONICITY. The score worsens at every step of increasing noise (white
      and FBP-like) and blur; 1b repeats this with noise added relative to the
      native noise of each image.
-  2. OVERFILTERING, forms 1 and 3.
-     Form 1: filtering a full-dose image cannot improve it; every case in
-     which the score improves is a failure, counted and reported.
-     Form 3: a fine noise ladder starting at zero, looking for a score minimum
-     at **non-zero** noise -- the mechanism by which a NIQE variant ranked a
-     noisy ultrasound image better than the original (MTAP 2024).
+  2. PREFERENCE FOR FILTERED FULL-DOSE IMAGES, forms 1 and 3.
+     Form 1: how often a filtered full-dose image scores better than its
+     source, a preference rate (a full-dose image still contains noise).
+     Form 3: noise added at fixed levels, against the noise floor -- the
+     behaviour by which a NIQE variant ranked a noisy ultrasound image better
+     than the original (MTAP 2024).
      Form 2, which compares the metric's optimum with the signal fidelity of
      inserted lesions, is in scripts/exp_lesions.py.
-  3. DISCRIMINATION. Five denoisers at matched strength on the same real
+  3. DISCRIMINATION. Five denoisers at matched strength on the same
      reduced-dose input: ordering, agreement across images.
   4. STABILITY. Bootstrap and leave-one-patient-out on the fitting corpus,
      learning curve, confidence intervals on the scores.
@@ -60,21 +61,21 @@ OUT = ROOT / "experiments"
 
 
 # ---------------------------------------------------------------------------
-# 0. Real dose  (added after validation)
+# 0. Reduced dose  (added after validation)
 # ---------------------------------------------------------------------------
 
 def exp0_real_dose(P, C, p, model, d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
-    """Real reduced dose must worsen the score: this is the use case."""
-    from riqe.dosetest import dose_ordering, dose_pairs, image_moments, summarize
+    """Reduced dose (projection-domain simulated) must worsen the score."""
+    from riqe.dosetest import dose_ordering, dose_pairs, low_cache_dir, pair_moments, summarize
 
     print("\n" + "=" * 78)
-    print("EXPERIMENT 0 - REAL REDUCED DOSE VS FULL DOSE, SAME SLICE")
+    print("EXPERIMENT 0 - REDUCED DOSE VS FULL DOSE, SAME SLICE")
     print("=" * 78)
     corpus = pd.read_parquet(ROOT / "corpus" / "corpus.parquet")
     split = json.load(open(ROOT / "corpus" / "split.json"))
     cache = FeatureCache(ROOT / "data" / "features" / f"P{P}_C{C:g}")
     pairs = dose_pairs(corpus, split["test"])
-    res = dose_ordering(model, pairs, image_moments(cache, list(pairs.path_full) + list(pairs.path_low)))
+    res = dose_ordering(model, pairs, pair_moments(cache, FeatureCache(low_cache_dir(P, C)), pairs))
     sm = summarize(res)
     print(f"  TEST pairs: {sm['n_pairs']} scoreable "
           f"(chest {sm['n_chest']}, abdomen {sm['n_abdomen']}; unscoreable {sm['n_unscoreable']})")
@@ -87,6 +88,31 @@ def exp0_real_dose(P, C, p, model, d: pd.DataFrame) -> tuple[pd.DataFrame, dict]
             print(f"    {reg}: median delta {np.median(g.score_low - g.score_full):+.4f}")
     res.to_csv(OUT / "exp0_real_dose.csv", index=False)
     return res, sm
+
+
+def exp0_original_criterion() -> dict | None:
+    """The same test for the setting chosen by the criterion declared before the
+    search, fitted on the same patients: how the discarded choice fares on TEST."""
+    from riqe.dosetest import dose_ordering, dose_pairs, low_cache_dir, pair_moments, summarize
+
+    ch = json.loads((OUT / "hparam_choice.json").read_text()).get("original_criterion_choice")
+    if not ch:
+        return None
+    P, C, p = int(ch["P"]), float(ch["C"]), float(ch["p"])
+    corpus = pd.read_parquet(ROOT / "corpus" / "corpus.parquet")
+    split = json.load(open(ROOT / "corpus" / "split.json"))
+    fit = corpus[(corpus["kind"] == "full") & corpus["keep"] & corpus.patient_id.isin(set(split["fit"]))]
+    cache = FeatureCache(ROOT / "data" / "features" / f"P{P}_C{C:g}")
+    model = cache.fit(list(fit["path"]), p, n_patients=fit.patient_id.nunique())
+    pairs = dose_pairs(corpus, split["test"])
+    res = dose_ordering(model, pairs, pair_moments(cache, FeatureCache(low_cache_dir(P, C)), pairs))
+    sm = summarize(res)
+    sm.update({"P": P, "C": C, "p": p})
+    print(f"  original-criterion setting P={P} C={C:g} p={p:g}: reduced dose scores worse in "
+          f"chest {100*sm['correct_chest']:.1f}%  abdomen {100*sm['correct_abdomen']:.1f}% "
+          f"({sm['n_chest']}/{sm['n_abdomen']} pairs)")
+    res.to_csv(OUT / "exp0_original_criterion.csv", index=False)
+    return sm
 
 
 # ---------------------------------------------------------------------------
@@ -199,76 +225,108 @@ def exp1_monotonicity(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
 
 # ---------------------------------------------------------------------------
-# 2. Overfiltering, forms 1 and 3
+# 2. Preference for filtered full-dose images, and for added noise
 # ---------------------------------------------------------------------------
 
-def exp2_overfiltering(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+#: tolerances on the score change, to separate preferences from near ties
+EPSILONS = (0.0, 0.01, 0.05, 0.1)
+
+
+def exp2_overfiltering(d: pd.DataFrame, model, NU) -> tuple[pd.DataFrame, dict]:
+    """Form 1: how often a filtered full-dose image scores better than its
+    source. A full-dose image still contains noise, so a better score after
+    filtering is not by itself an error of the metric: this is a preference
+    rate, and whether the preferred filtering destroys signal is tested with
+    inserted lesions (scripts/exp_lesions.py).
+
+    Form 3: whether adding FBP-like noise to a full-dose image improves the
+    score, at each fixed level, against the difference between two noise
+    realisations of the same level (the noise floor of the test)."""
+    from riqe.evaluate import score_all_refcov
+
     print("\n" + "=" * 78)
-    print("EXPERIMENT 2 - OVERFILTERING (forms 1 and 3)")
+    print("EXPERIMENT 2 - PREFERENCE FOR FILTERED FULL-DOSE IMAGES (forms 1 and 3)")
     print("=" * 78)
-    orig = {r.slice_path: r.score for r in d[(d.kind == "original") & (d.source == "full")].itertuples()}
+    full = d[d.source == "full"].copy()
+    full["score_refcov"] = score_all_refcov(model, NU, full["row"].to_numpy())
+    orig = full[full.kind == "original"].set_index("slice_path")
+    full["region"] = np.where(full.cell.str.contains("CHEST"), "chest", "abdomen")
 
     # --- form 1 ------------------------------------------------------------
-    den = d[(d.kind == "denoise") & (d.source == "full")].copy()
-    den["score_orig"] = den["slice_path"].map(orig)
+    den = full[full.kind == "denoise"].copy()
+    den["score_orig"] = den["slice_path"].map(orig["score"])
     den["delta"] = den["score"] - den["score_orig"]
-    den["failure"] = den["delta"] < 0
-    ok = den["delta"].notna()
+    den["preferred"] = (den["delta"] < 0).astype(float)
+    den["delta_refcov"] = den["score_refcov"] - den["slice_path"].map(orig["score_refcov"])
+    den["preferred_refcov"] = (den["delta_refcov"] < 0).astype(float)
+    den = den[den["delta"].notna()]
     print("\n  FORM 1 - filtering a full-dose image")
-    print("  failure definition, declared in advance: score(filtered) < score(original)")
-    print(f"  cases evaluated: {int(ok.sum())}")
-    print(f"  FAILURES: {int(den.loc[ok,'failure'].sum())} "
-          f"({100*den.loc[ok,'failure'].mean():.2f}%)")
-    tab = den[ok].pivot_table(index="denoiser", columns="target_residual_hu",
-                              values="failure", aggfunc="mean")
-    print("\n  failure fraction by denoiser x strength (residual HU):")
+    print(f"  filtered images: {len(den)} from {den.slice_path.nunique()} slices, "
+          f"{den.patient_id.nunique()} patients")
+    eps = {f"{e:g}": float((den["delta"] < -e).mean()) for e in EPSILONS}
+    print("  preferred to the source (score lower by more than eps): "
+          + ", ".join(f"eps={k}: {100*v:.1f}%" for k, v in eps.items()))
+    tab = den.pivot_table(index="denoiser", columns="target_residual_hu", values="preferred", aggfunc="mean")
+    print("\n  preference rate by denoiser x strength (residual HU):")
     print((100 * tab).round(1).to_string())
-    tab2 = den[ok].pivot_table(index="denoiser", columns="target_residual_hu",
-                               values="delta", aggfunc="median")
-    print("\n  median score change (positive = worse, as it should be):")
+    tab2 = den.pivot_table(index="denoiser", columns="target_residual_hu", values="delta", aggfunc="median")
+    print("\n  median score change (positive = worse):")
     print(tab2.round(3).to_string())
+    tab_ref = den.pivot_table(index="denoiser", columns="target_residual_hu",
+                              values="preferred_refcov", aggfunc="mean")
+    print("\n  ablation, image covariance left out of the distance: preference rate")
+    print((100 * tab_ref).round(1).to_string())
 
     # --- form 3 ------------------------------------------------------------
-    fine = d[(d.kind == "noise_fbp") & (d.source == "full")]
-    print("\n  FORM 3 - is there a noise level that IMPROVES the score?")
+    fine = full[full.kind == "noise_fbp"].copy()
+    fine["delta"] = fine["score"] - fine["slice_path"].map(orig["score"])
+    fine["delta_refcov"] = fine["score_refcov"] - fine["slice_path"].map(orig["score_refcov"])
+    # noise floor: levels drawn twice with different realisations
+    dup = fine.groupby(["slice_path", "sigma_hu"])["score"].agg(["count", lambda x: x.max() - x.min()])
+    dup.columns = ["count", "range"]
+    floor = dup[dup["count"] == 2].groupby(level=1)["range"].median()
     rows3 = []
-    if not fine.empty:
-        for sp, gg in fine.groupby("slice_path"):
-            gg = gg.sort_values("sigma_hu")
-            sig = np.concatenate([[0.0], gg["sigma_hu"].to_numpy()])
-            sc = np.concatenate([[orig.get(sp, np.nan)], gg["score"].to_numpy()])
-            if not np.isfinite(sc).all():
-                continue
-            j = int(np.argmin(sc))
-            rows3.append({"slice_path": sp, "sigma_opt_hu": float(sig[j]),
-                          "score_min": float(sc[j]), "score_at_zero": float(sc[0]),
-                          "gain": float(sc[0] - sc[j]),
-                          "min_not_at_zero": bool(j > 0)})
+    from scipy.stats import binomtest
+    for (reg, sig), g in fine.groupby(["region", "sigma_hu"]):
+        g = g.groupby("slice_path").agg(delta=("delta", "mean"), delta_refcov=("delta_refcov", "mean"),
+                                        patient_id=("patient_id", "first"))
+        g = g.dropna()
+        k, n = int((g.delta < 0).sum()), int(len(g))
+        rows3.append({"region": reg, "sigma_hu": float(sig), "n_images": n,
+                      "n_patients": int(g.patient_id.nunique()),
+                      "fraction_better": k / n if n else np.nan,
+                      "p_sign": binomtest(k, n, 0.5).pvalue if n else np.nan,
+                      "median_delta": float(g.delta.median()),
+                      "fraction_better_refcov": float((g.delta_refcov < 0).mean()),
+                      "noise_floor": float(floor.get(sig, np.nan))})
     r3 = pd.DataFrame(rows3)
-    if len(r3):
-        frac = r3["min_not_at_zero"].mean()
-        print(f"  images whose score improves when noise is added: "
-              f"{int(r3['min_not_at_zero'].sum())}/{len(r3)} ({100*frac:.1f}%)")
-        if frac > 0:
-            q = r3[r3.min_not_at_zero]
-            print(f"  preferred sigma (median): {q.sigma_opt_hu.median():.1f} HU; "
-                  f"median gain {q.gain.median():.4f}")
-            print("  => the model has a preferred non-zero noise level.")
-            print("     This is the mechanism by which NIQE-K ranked a noisy")
-            print("     ultrasound image better than the original. Declare it as a property.")
-        else:
-            print("  => none: the score is minimal at zero noise, as it should be.")
-        r3.to_csv(OUT / "exp2_form3_noise_optimum.csv", index=False)
+    print("\n  FORM 3 - adding FBP-like noise to a full-dose image, per fixed level")
+    print("  noise floor = median |difference| between two realisations of the same level")
+    print(r3.round(4).to_string(index=False))
+
+    # the endpoint used earlier, kept for comparison: minimum over the ladder
+    amin = []
+    for sp, gg in fine.groupby("slice_path"):
+        gg = gg.groupby("sigma_hu")["score"].mean()
+        sc = np.concatenate([[orig["score"].get(sp, np.nan)], gg.to_numpy()])
+        if np.isfinite(sc).all():
+            amin.append(int(np.argmin(sc)) > 0)
+    frac_argmin = float(np.mean(amin)) if amin else np.nan
+    print(f"\n  images whose minimum over the {fine.sigma_hu.nunique()} levels is not at zero: "
+          f"{100*frac_argmin:.1f}% (inflated by taking a minimum over many near ties)")
 
     den.to_csv(OUT / "exp2_form1_overfiltering.csv", index=False)
+    r3.to_csv(OUT / "exp2_form3_fixed_levels.csv", index=False)
     summary = {
-        "form1_n_evaluated": int(ok.sum()),
-        "form1_n_failures": int(den.loc[ok, "failure"].sum()),
-        "form1_failure_fraction": float(den.loc[ok, "failure"].mean()),
+        "form1_n_evaluated": int(len(den)),
+        "form1_n_patients": int(den.patient_id.nunique()),
+        "form1_preference_rate": float(den["preferred"].mean()),
+        "form1_preference_rate_by_eps": eps,
+        "form1_preference_rate_refcov": float(den["preferred_refcov"].mean()),
         "form1_by_denoiser": (100 * tab).round(2).to_dict(),
-        "form3_fraction_min_not_at_zero": float(r3["min_not_at_zero"].mean()) if len(r3) else None,
-        "form3_median_preferred_sigma_hu": (
-            float(r3.loc[r3.min_not_at_zero, "sigma_opt_hu"].median()) if len(r3) and r3["min_not_at_zero"].any() else None),
+        "form1_by_denoiser_refcov": (100 * tab_ref).round(2).to_dict(),
+        "form3_fixed_levels": r3.to_dict("records"),
+        "form3_fraction_argmin_not_at_zero": frac_argmin,
     }
     return den, summary
 
@@ -450,11 +508,12 @@ def main() -> int:
     skip = set(args.skip.split(","))
     if "0" not in skip:
         _, summaries["exp0_real_dose"] = exp0_real_dose(P, C, p, model, d)
+        summaries["exp0_original_criterion"] = exp0_original_criterion()
     if "1" not in skip:
         _, summaries["exp1_monotonicity"] = exp1_monotonicity(d)
         _, summaries["exp1b_relative_noise"] = exp1b_relative_noise(d)
     if "2" not in skip:
-        _, summaries["exp2_overfiltering"] = exp2_overfiltering(d)
+        _, summaries["exp2_overfiltering"] = exp2_overfiltering(d, model, NU)
     if "3" not in skip:
         _, summaries["exp3_discrimination"] = exp3_discrimination(d)
     if "4" not in skip:

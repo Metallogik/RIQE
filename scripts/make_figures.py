@@ -100,17 +100,17 @@ def fig_design() -> None:
          "158 patients, full dose\n3,792 slices after S1–S6",
          "36 NSS features per patch\nsharpness selection, Gaussian fit",
          "Model: mean, covariance\nand every slice with its SHA-256",
-         "MAIN FINDING\nThe refit from public data\nis bit-identical"),
+         "MAIN FINDING\nThe refit from public data is\nbit-identical (same environment)"),
         ("Hyperparameter selection",
          "Inner split of the fitting patients\n118 fit / 40 validation",
          "168 settings of P, C and p\nfour ranked criteria",
          "P = 24, C = 0.01, p = 0.5\ncriterion revised once, declared",
-         "MAIN FINDING\nNo setting both ranks real dose\nand resists overfiltering"),
+         "MAIN FINDING\nNo setting both ranks reduced dose\nand avoids preferring filtered images"),
         ("Held-out evaluation",
          "40 test patients\nLDCTIQAC 2023, CC0 photographs",
-         "Real dose, noise, blur, denoisers\ninserted lesions, sub-models",
-         "Detection, overfiltering,\nlesion signal, stratification",
-         "MAIN FINDING\nDetects degradation, but rewards\nedge-preserving filtering"),
+         "Simulated reduced dose, noise, blur,\ndenoisers, inserted lesions, sub-models",
+         "Paired ranking, preference for filtered\nimages, lesion signal, stratification",
+         "MAIN FINDING\nRanks degraded versions, but prefers\nfiltering that removes lesion signal"),
     ]
     for k, (title, inputs, process, outputs, finding) in enumerate(columns):
         x, w = 0.015 + k * 0.332, 0.306
@@ -153,7 +153,7 @@ def fig_tradeoff() -> None:
     ax.axhline(95, color=fs.MUTED, lw=1.0, ls="--", zorder=1)
     ax.text(ax.get_xlim()[0], 95.8, " 95% threshold", ha="left", va="bottom", fontsize=8)
     ax.set_xlabel("Filtered full-dose images scoring better (%)")
-    ax.set_ylabel("Real reduced dose ranked worse,\nworse of chest and abdomen (%)")
+    ax.set_ylabel("Reduced dose ranked worse,\nworse of chest and abdomen (%)")
     ax.set_ylim(-3, 103)
     ax.legend(loc="lower right")
     fs.clean(ax, "both")
@@ -174,7 +174,8 @@ def fig_response() -> None:
     d["delta"] = d["score"] - d["slice_path"].map(orig)
     d["region"] = region_of(d["cell"])
 
-    fig, axes = plt.subplots(1, 3, figsize=(FULL_WIDTH, 2.55), layout="constrained")
+    fig, axes = plt.subplots(1, 4, figsize=(FULL_WIDTH, 2.45), layout="constrained",
+                             width_ratios=(1, 1, 1.15, 1))
 
     # A: noise relative to the native noise of each image
     ax = axes[0]
@@ -202,10 +203,19 @@ def fig_response() -> None:
     for i, name in enumerate(ORDER):
         m = g[g.denoiser == name].groupby("target_residual_hu")["delta"].median()
         ax.plot(m.index, m.values, label=NICE[name], **fs.style_for(i))
-    fs.panel(ax, "C", "Denoising a full-dose image")
-    ax.set_xlabel("Residual standard deviation (HU)")
+    fs.panel(ax, "C", "Filtering a full-dose image")
+    ax.set_xlabel("Residual std (HU)")
     log2_axis(ax, [2, 4, 8, 16, 32, 64])
-    ax.legend(loc="upper left", ncol=1, handlelength=2.6)
+    ax.legend(loc="upper left", ncol=1, handlelength=2.6, fontsize=7)
+
+    # D: the same, light filtering only, on a scale where the improvements show
+    ax = axes[3]
+    for i, name in enumerate(ORDER):
+        m = g[(g.denoiser == name) & (g.target_residual_hu <= 16)].groupby("target_residual_hu")["delta"].median()
+        ax.plot(m.index, m.values, label=NICE[name], **fs.style_for(i))
+    fs.panel(ax, "D", "C, light filtering")
+    ax.set_xlabel("Residual std (HU)")
+    log2_axis(ax, [2, 4, 8, 16])
 
     for ax in axes:
         ax.axhline(0, color=fs.MUTED, lw=0.8, ls="--", zorder=1)
@@ -324,17 +334,34 @@ def fig_examples() -> None:
               if f.shape[0] >= MIN_PATCHES_FOR_SCORE else np.nan)
         imgs.append((label, img[y0:y1, x0:x1], sc))
 
-    fig, axes = plt.subplots(1, 4, figsize=(FULL_WIDTH, 2.25), layout="constrained")
-    for ax, (label, crop, sc) in zip(axes, imgs):
-        ax.imshow(crop, cmap="gray", vmin=WINDOW[0], vmax=WINDOW[1], interpolation="nearest")
-        for (cy, cx), r in zip(sites, radii):
-            ax.add_patch(Circle((cx - x0, cy - y0), r + 4, fill=False, color="white", lw=0.5))
-        ax.set_title(label, fontsize=8.2)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_xlabel(f"RIQE {sc:.2f}", fontsize=8.2)
-        for sp in ax.spines.values():
-            sp.set_visible(False)
+    ps = meta["pixel_spacing"]
+    # zoom on the two larger lesions, 24 mm wide
+    zc = np.mean(sites[:2], axis=0).round().astype(int)
+    zh = int(round(12.0 / ps))
+    zy0, zx0 = int(zc[0] - zh), int(zc[1] - zh)
+    fig, axes = plt.subplots(2, 4, figsize=(FULL_WIDTH, 4.1), layout="constrained")
+    for k, (label, crop, sc) in enumerate(imgs):
+        zoom = crop[zy0 - y0:zy0 - y0 + 2 * zh, zx0 - x0:zx0 - x0 + 2 * zh]
+        for row, (im, oy, ox, bar_mm) in enumerate(((crop, y0, x0, 20.0), (zoom, zy0, zx0, 5.0))):
+            ax = axes[row, k]
+            ax.imshow(im, cmap="gray", vmin=WINDOW[0], vmax=WINDOW[1], interpolation="nearest")
+            for (cy, cx), r in zip(sites, radii):
+                ax.add_patch(Circle((cx - ox, cy - oy), r + (4 if row == 0 else 2.5), fill=False,
+                                    color="white", lw=0.5))
+            h, wid = im.shape
+            L = bar_mm / ps
+            ax.plot([0.06 * wid, 0.06 * wid + L], [0.93 * h] * 2, color="white", lw=1.6,
+                    solid_capstyle="butt")
+            ax.text(0.06 * wid, 0.89 * h, f"{bar_mm:g} mm", color="white", fontsize=6.5,
+                    ha="left", va="bottom")
+            ax.set_xlim(-0.5, wid - 0.5)
+            ax.set_ylim(h - 0.5, -0.5)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for sp in ax.spines.values():
+                sp.set_visible(False)
+        axes[0, k].set_title(label, fontsize=8.2)
+        axes[1, k].set_xlabel(f"RIQE {sc:.2f}", fontsize=8.2)
     save(fig, "fig_examples")
     info = {"slice_path": EXAMPLE_SLICE, "noise_sigma_hu": noise, "window_hu": WINDOW,
             "sites": sites, "crop": [int(y0), int(y1), int(x0), int(x1)],
@@ -391,22 +418,21 @@ def fig_ldctiqac() -> None:
     if not need(f, s):
         return
     d = pd.read_csv(f)
-    summ = json.loads(s.read_text())
-    window = "W350/L40"
-    d = d[(d.window == window)].dropna(subset=["score"])
-    fig, axes = plt.subplots(1, 2, figsize=(FULL_WIDTH, 2.7), layout="constrained")
+    summ = json.loads(s.read_text())["models"]
+    panels = [(k, t) for k, t in (("riqe", "RIQE (CT)"), ("photographic", "Same settings, photos"),
+                                  ("niqe_params", "NIQE parameters, photos")) if k in d]
+    fig, axes = plt.subplots(1, len(panels), figsize=(FULL_WIDTH, 2.55), layout="constrained")
+    axes = np.atleast_1d(axes)
     rng = np.random.default_rng(0)
-    for ax, (letter, model, title) in zip(axes, (("A", "RIQE", "RIQE, fitted on CT"),
-                                                 ("B", "photographic", "Same code fitted on photographs"))):
-        g = d[d.model == model]
+    for i, (ax, (col, title)) in enumerate(zip(axes, panels)):
+        g = d.dropna(subset=[col])
         x = g["radiologist"].to_numpy(float)
-        ax.scatter(x + rng.uniform(-0.05, 0.05, len(x)), g["score"], s=5, color=fs.MUTED,
+        ax.scatter(x + rng.uniform(-0.05, 0.05, len(x)), g[col], s=4, color=fs.MUTED,
                    alpha=0.35, linewidths=0)
-        med = g.groupby(g["radiologist"].round(1))["score"].median()
-        ax.plot(med.index, med.values, "o-", color=fs.INK, markersize=3.2, lw=1.2)
-        rho = summ["windows"][window][model]["spearman"]
-        fs.panel(ax, letter, f"{title}  ($\\rho = {rho:+.2f}$)")
-        ax.set_xlabel("Mean radiologist score (0 worst, 4 best)")
+        med = g.groupby(g["radiologist"].round(1))[col].median()
+        ax.plot(med.index, med.values, "o-", color=fs.INK, markersize=3.0, lw=1.2)
+        fs.panel(ax, "ABC"[i], f"{title}, $\\rho = {summ[col]['spearman']:+.2f}$")
+        ax.set_xlabel("Mean radiologist score")
         fs.clean(ax)
     axes[0].set_ylabel("Score")
     save(fig, "fig_ldctiqac")

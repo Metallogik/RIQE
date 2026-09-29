@@ -16,7 +16,7 @@ Three models compared on the same CT images:
   3. photographic, CC0/PD photo corpus, masks off.
 
 On top of the qualitative verdicts, RIQE and the photographic model are
-compared on real-dose ordering and on detection of noise added relative to
+compared on reduced-dose ordering and on detection of noise added relative to
 the native noise, on the TEST split.
 
 If the photographic model orders CT degradations like ours, modality-specific
@@ -61,10 +61,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from riqe import degrade as dg  # noqa: E402
 from riqe.cache import FeatureCache  # noqa: E402
+from riqe import niqecfg  # noqa: E402
 from riqe.dicomio import read_hu  # noqa: E402
-from riqe.dosetest import dose_ordering, dose_pairs, image_moments, summarize  # noqa: E402
+from riqe.dosetest import dose_ordering, dose_pairs, low_cache_dir, pair_moments, summarize  # noqa: E402
 from riqe.evaluate import attach_scores, load_moments, spearman, step_monotone  # noqa: E402
-from riqe.extract import Spec, features_from_hu, masks_for  # noqa: E402
+from riqe.extract import Spec, features_from_hu, luminance, masks_for  # noqa: E402
 from riqe.model import fit_mvg, model_divergence  # noqa: E402
 from riqe.nss import patch_features  # noqa: E402
 
@@ -300,24 +301,47 @@ def verdicts(d: pd.DataFrame, col: str) -> dict:
     return out
 
 
-def dose_and_rel_noise(model, pairs, pair_moments, meta, NU, SG) -> dict:
-    """Real-dose ordering and relative-noise detection (% correct) under a model."""
-    s = summarize(dose_ordering(model, pairs, pair_moments))
-    d = attach_scores(meta.copy(), model, NU, SG)
-    o = d[(d.kind == "original") & (d.source == "full")].set_index("slice_path")["score"]
+def photo_features_niqe(job):
+    """Photograph patches with the published NIQE parameters (riqe/niqecfg.py)."""
+    path, seed = job
+    lum = luminance_of(ROOT / path)
+    if lum is None or min(lum.shape) < 2 * niqecfg.P:
+        return None
+    f = niqecfg.fitting_features(lum)
+    if f.shape[0] > MAX_PATCHES_PER_PHOTO:
+        idx = np.random.default_rng(seed).choice(f.shape[0], MAX_PATCHES_PER_PHOTO, replace=False)
+        f = f[idx]
+    return f.astype(np.float32) if f.shape[0] else None
+
+
+def niqe_moments_of(path):
+    """Whole-image moments of a CT slice with the NIQE parameters."""
+    hu, _, _ = read_hu(str(ROOT / path))
+    mu, cov, _ = niqecfg.image_moments(luminance(hu, Spec(use_masks=False)))
+    return path, (None if mu is None else (mu, cov))
+
+
+def dose_and_rel_noise(model, pairs, moments_pairs, d, col) -> tuple[dict, pd.DataFrame]:
+    """Reduced-dose ordering and relative-noise detection (% correct) for the
+    scores in column `col`; also returns the scored pairs."""
+    scored = dose_ordering(model, pairs, moments_pairs)
+    s = summarize(scored)
+    o = d[(d.kind == "original") & (d.source == "full")].set_index("slice_path")[col]
     g = d[(d.kind == "noise_rel") & (d.source == "full")].copy()
     g["base"] = g.slice_path.map(o)
-    g = g.dropna(subset=["score", "base"])
-    rel = (g.assign(worse=g.score > g.base).groupby("rel_increase")["worse"].mean() * 100).round(1)
-    return {"dose_chest": round(100 * s["correct_chest"], 1),
-            "dose_abdomen": round(100 * s["correct_abdomen"], 1),
-            **{f"noise_+{int(round(100 * k))}%": float(v) for k, v in rel.items()}}
+    g = g.dropna(subset=[col, "base"])
+    rel = (g.assign(worse=g[col] > g.base).groupby("rel_increase")["worse"].mean() * 100).round(1)
+    return ({"dose_chest": round(100 * s["correct_chest"], 1),
+             "dose_abdomen": round(100 * s["correct_abdomen"], 1),
+             **{f"noise_+{int(round(100 * k))}%": float(v) for k, v in rel.items()}}, scored)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n-photos", type=int, default=125)
     ap.add_argument("--moments", default="experiments/bank_test_moments.npz")
+    ap.add_argument("--niqe-moments", default="experiments/bank_test_moments_niqecfg.npz",
+                    help="bank moments with the NIQE parameters (score_bank.py --niqe-config)")
     ap.add_argument("--P", type=int, default=None)
     ap.add_argument("--C", type=float, default=None)
     ap.add_argument("--p", type=float, default=None)
@@ -377,6 +401,19 @@ def main() -> int:
     print(f"photographic model: {len(parts)} images, {photo_model.n_patches} patches, "
           f"cond={photo_model.cond():.3e}  ({(time.time()-t0)/60:.1f} min)")
 
+    # the same photographs with the parameters published for NIQE
+    parts_n = []
+    with cf.ProcessPoolExecutor(args.workers) as ex:
+        for f in ex.map(photo_features_niqe, [(r["path"], args.seed + i) for i, r in enumerate(photos)],
+                        chunksize=2):
+            if f is not None:
+                parts_n.append(f)
+    niqe_model = fit_mvg(np.concatenate(parts_n), n_images=len(parts_n), n_patients=len(parts_n),
+                         meta={"corpus": "Wikimedia Commons PD/CC0", "P": niqecfg.P,
+                               "C": niqecfg.C, "p": niqecfg.P_SELECT})
+    print(f"photographic model with NIQE parameters (P={niqecfg.P}, C={niqecfg.C:g}, "
+          f"p={niqecfg.P_SELECT:g}): {len(parts_n)} images, {niqe_model.n_patches} patches")
+
     # --- CT models, with and without masks ------------------------------------
     corpus = pd.read_parquet(ROOT / "corpus" / "corpus.parquet")
     split = json.load(open(ROOT / "corpus" / "split.json"))
@@ -411,29 +448,43 @@ def main() -> int:
     d = attach_scores(meta, ct_model, NU, SG, "riqe")
     d = attach_scores(d, ct_nomask, NU, SG, "ct_nomask")
     d = attach_scores(d, photo_model, NU, SG, "photo")
+    nmeta, NNU, NSG = load_moments(args.niqe_moments)
+    nmeta = attach_scores(nmeta, niqe_model, NNU, NSG, "niqe_params")
+    key = ["slice_path", "source", "label"]
+    d = d.merge(nmeta[key + ["niqe_params"]].drop_duplicates(key), on=key, how="left")
 
     rho_ph = spearman(d["riqe"], d["photo"])
     rho_nm = spearman(d["riqe"], d["ct_nomask"])
+    rho_nq = spearman(d["riqe"], d["niqe_params"])
     print(f"\nSpearman between rankings on {len(d)} CT images:")
-    print(f"  RIQE vs photographic  : {rho_ph:+.4f}")
-    print(f"  RIQE vs CT masks off  : {rho_nm:+.4f}")
+    print(f"  RIQE vs photographic (same settings) : {rho_ph:+.4f}")
+    print(f"  RIQE vs NIQE parameters, photographs : {rho_nq:+.4f}")
+    print(f"  RIQE vs CT masks off                 : {rho_nm:+.4f}")
 
     print("\nqualitative verdicts under each model:")
     rows = []
     for name, col in (("RIQE (CT, masks)", "riqe"), ("CT without masks", "ct_nomask"),
-                      ("photographic PD/CC0", "photo")):
+                      ("photographic PD/CC0", "photo"), ("NIQE parameters, PD/CC0", "niqe_params")):
         v = verdicts(d, col)
         rows.append({"model": name, **v})
     vt = pd.DataFrame(rows)
     print(vt.round(4).to_string(index=False))
 
-    # --- real dose and relative noise, RIQE vs photographic ----------------------
+    # --- reduced dose and relative noise ----------------------------------------
     pairs = dose_pairs(corpus, split["test"])
-    pair_moments = image_moments(cache, list(pairs.path_full) + list(pairs.path_low))
-    dr = {"RIQE (CT)": dose_and_rel_noise(ct_model, pairs, pair_moments, meta, NU, SG),
-          "photographic": dose_and_rel_noise(photo_model, pairs, pair_moments, meta, NU, SG)}
-    print("\nreal dose ordered correctly and relative noise detected (% of TEST cases):")
+    moments_pairs = pair_moments(cache, FeatureCache(low_cache_dir(P, C)), pairs)
+    with cf.ProcessPoolExecutor(args.workers) as ex:
+        niqe_pairs = dict(ex.map(niqe_moments_of, list(pairs.path_full) + list(pairs.path_low),
+                                 chunksize=8))
+    dr, scored = {}, []
+    for label, model, mom, col in (("RIQE (CT)", ct_model, moments_pairs, "riqe"),
+                                   ("photographic", photo_model, moments_pairs, "photo"),
+                                   ("NIQE parameters", niqe_model, niqe_pairs, "niqe_params")):
+        dr[label], sc = dose_and_rel_noise(model, pairs, mom, d, col)
+        scored.append(sc.assign(model=label))
+    print("\nreduced dose ordered correctly and relative noise detected (% of TEST cases):")
     print(pd.DataFrame(dr).T.to_string())
+    pd.concat(scored, ignore_index=True).to_csv(OUT / "exp5_dose_pairs.csv", index=False)
 
     changed = not np.allclose(
         vt.iloc[0].drop("model").astype(float).to_numpy(),
@@ -447,11 +498,15 @@ def main() -> int:
     d.to_csv(OUT / "exp5_scores_three_models.csv", index=False)
     vt.to_csv(OUT / "exp5_verdicts.csv", index=False)
     np.savez_compressed(OUT / "exp5_photo_model.npz", nu=photo_model.nu, sigma=photo_model.sigma)
+    np.savez_compressed(OUT / "exp5_photo_model_niqecfg.npz", nu=niqe_model.nu, sigma=niqe_model.sigma)
     (OUT / "exp5_dose_and_relnoise.json").write_text(json.dumps(dr, indent=1))
     (OUT / "exp5_summary.json").write_text(json.dumps({
         "P": P, "C": C, "p": p,
         "photo_corpus": {"n_images": len(parts), "n_patches": int(photo_model.n_patches),
                          "source": f"Wikimedia Commons {POOL_CATEGORY}, PD/CC0"},
+        "niqe_parameters_model": {"P": niqecfg.P, "C": niqecfg.C, "p": niqecfg.P_SELECT,
+                                  "n_images": len(parts_n), "n_patches": int(niqe_model.n_patches)},
+        "spearman_riqe_vs_niqe_params": rho_nq,
         "D_ct_vs_nomask": model_divergence(ct_model, ct_nomask),
         "D_ct_vs_photo": model_divergence(ct_model, photo_model),
         "D_nomask_vs_photo": model_divergence(ct_nomask, photo_model),

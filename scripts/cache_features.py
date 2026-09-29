@@ -5,12 +5,16 @@ One cache per (P, C) setting: these are the only components that change the
 per-patch features. The sharpness threshold `p` acts **downstream**, on
 selection, so it can be swept for free from the stored `delta`.
 
+With --paired-low, the cache holds instead the reduced-dose slice paired to
+every kept full-dose slice (same patient, identical z), extracted on the
+masks of the full-dose slice (see riqe/dosetest.py).
+
 Only patches inside the domain are stored (field of view at 100%, body at the
 declared fraction): the others are usable neither for fitting nor for
 scoring.
 
     .venv/bin/python scripts/cache_features.py [--workers 24] \
-        [--P 16,24,32] [--C 1,0.5,0.25,0.1,0.05,0.025,0.01] [--kind full,low]
+        [--P 16,24,32] [--C 1,0.5,0.25,0.1,0.05,0.025,0.01] [--paired-low]
 """
 
 from __future__ import annotations
@@ -37,6 +41,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from riqe.dicomio import read_hu  # noqa: E402
+from riqe.dosetest import dose_pairs, low_cache_dir  # noqa: E402
 from riqe.extract import Spec, features_from_hu, masks_for  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,9 +60,15 @@ def _init(spec_dict: dict) -> None:
     _SPEC = Spec(**spec_dict)
 
 
-def _one(path: str):
+def _one(job):
+    # a path, or (reduced-dose path, full-dose path whose masks are used)
+    path, mask_path = (job, job) if isinstance(job, str) else job
     hu, pad, _ = read_hu(path)
-    fov, body = masks_for(hu, pad)
+    if mask_path == path:
+        fov, body = masks_for(hu, pad)
+    else:
+        huf, padf, _ = read_hu(mask_path)
+        fov, body = masks_for(huf, padf)
     pf = features_from_hu(hu, pad, _SPEC, fitting=False, masks=(fov, body))
     v = pf.valid
     return (
@@ -68,9 +79,9 @@ def _one(path: str):
     )
 
 
-def build(P: int, C: float, paths: list[str], workers: int) -> dict:
+def build(P: int, C: float, paths: list, workers: int, out: Path | None = None) -> dict:
     spec = Spec(P=P, C=C, p=None)  # p=None: selection applied downstream
-    out = CACHE / cache_name(P, C)
+    out = out or CACHE / cache_name(P, C)
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
 
@@ -116,20 +127,31 @@ def main() -> int:
     ap.add_argument("--P", default="16,24,32")
     ap.add_argument("--C", default="1.0,0.5,0.25,0.1,0.05,0.025,0.01")
     ap.add_argument("--kind", default="full,low")
+    ap.add_argument("--paired-low", action="store_true",
+                    help="cache the reduced-dose slices paired to kept full-dose slices, "
+                         "on the full-dose masks")
     args = ap.parse_args()
 
     corpus = pd.read_parquet(ROOT / "corpus" / "corpus.parquet")
-    kinds = args.kind.split(",")
-    sel = corpus[(corpus["kind"].isin(kinds)) & (corpus["keep"])]
-    paths = [str(ROOT / p) for p in sel["path"]]
-    print(f"slices to extract: {len(paths)}  "
-          f"(patients {sel.patient_id.nunique()}, protocol cells {sel.cell.nunique()})")
+    if args.paired_low:
+        pairs = dose_pairs(corpus)
+        jobs = [(str(ROOT / lo), str(ROOT / fu)) for lo, fu in zip(pairs.path_low, pairs.path_full)]
+        print(f"reduced-dose slices paired to kept full-dose slices: {len(jobs)} "
+              f"(patients {pairs.patient_id.nunique()})")
+    else:
+        kinds = args.kind.split(",")
+        sel = corpus[(corpus["kind"].isin(kinds)) & (corpus["keep"])]
+        jobs = [str(ROOT / p) for p in sel["path"]]
+        print(f"slices to extract: {len(jobs)}  "
+              f"(patients {sel.patient_id.nunique()}, protocol cells {sel.cell.nunique()})")
 
     infos = []
     for P in [int(x) for x in args.P.split(",")]:
         for C in [float(x) for x in args.C.split(",")]:
-            infos.append(build(P, C, paths, args.workers))
-    (CACHE / "cache_summary.json").write_text(json.dumps(infos, indent=1))
+            out = low_cache_dir(P, C) if args.paired_low else None
+            infos.append(build(P, C, jobs, args.workers, out))
+    summary = (low_cache_dir(0, 0).parent if args.paired_low else CACHE) / "cache_summary.json"
+    summary.write_text(json.dumps(infos, indent=1))
     return 0
 
 

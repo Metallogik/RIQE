@@ -105,3 +105,38 @@ def holm(pvals: dict[str, float]) -> dict[str, float]:
     for k, v in pvals.items():
         out.setdefault(k, float("nan"))
     return out
+
+
+def score_all_refcov(model: MVGModel, NU: np.ndarray, rows) -> np.ndarray:
+    """Ablation of the score: the image covariance is left out, so the
+    distance is sqrt((nu_ref - nu_img)^T Sigma_ref^+ (nu_ref - nu_img)).
+
+    If a preference survives this ablation it comes from the shift of the
+    mean features towards the reference, not from a change in the spread of
+    the image's own patch features."""
+    rows = np.asarray(rows, dtype=int)
+    pinv = np.linalg.pinv(np.asarray(model.sigma, dtype=np.float64), rcond=RCOND)
+    out = np.full(len(rows), np.nan)
+    for k, i in enumerate(rows):
+        if np.isfinite(NU[i, 0]):
+            dv = np.asarray(model.nu, dtype=np.float64) - NU[i].astype(np.float64)
+            out[k] = float(np.sqrt(max(dv @ pinv @ dv, 0.0)))
+    return out
+
+
+def cluster_bootstrap(frame: pd.DataFrame, stat, cluster: str = "patient_id",
+                      B: int = 2000, seed: int = 20260917, level: float = 95.0) -> dict:
+    """Percentile confidence interval of `stat(frame)`, resampling whole
+    clusters (patients) with replacement, so that slices, pairs and
+    transformations of one patient stay together."""
+    rng = np.random.default_rng(seed)
+    groups = [g for _, g in frame.groupby(cluster)]
+    est = float(stat(frame))
+    vals = np.empty(B)
+    for b in range(B):
+        take = rng.integers(0, len(groups), len(groups))
+        vals[b] = stat(pd.concat([groups[i] for i in take], ignore_index=True))
+    a = (100.0 - level) / 2.0
+    lo, hi = np.nanpercentile(vals, [a, 100.0 - a])
+    return {"estimate": est, "ci_low": float(lo), "ci_high": float(hi),
+            "n_items": int(len(frame)), "n_clusters": int(len(groups)), "B": B}

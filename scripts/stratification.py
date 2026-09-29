@@ -13,10 +13,12 @@ corpus:
   divergent only because its Sigma is estimated worse), and it needs no
   distributional assumption.
 
-  UPPER ANCHOR, a real physical difference. D between the full-dose model and
-  the reduced-dose model on the **same** patients: a true acquisition
-  difference, of the size the metric must detect. Its null is the paired
-  permutation of the dose label within each patient.
+  UPPER ANCHOR, a physical difference. D between the model fitted on the
+  full-dose slices and the model fitted on the reduced-dose reconstructions
+  of the **same** slices (projection-domain noise insertion by the data
+  providers, scored on the full-dose masks): a difference of the size the
+  metric must detect. Its null is the paired permutation of the dose label
+  within each patient.
 
 The reported index is
 
@@ -59,7 +61,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from riqe.cache import FeatureCache  # noqa: E402
+from riqe.cache import FeatureCache, MergedCache  # noqa: E402
+from riqe.dosetest import dose_pairs, low_cache_dir  # noqa: E402
 from riqe.model import feature_shift, model_divergence, symmetric_kl  # noqa: E402
 from riqe.nss import FEATURE_NAMES  # noqa: E402
 
@@ -182,9 +185,14 @@ def main() -> int:
     cache = FeatureCache(ROOT / "data" / "features" / f"P{args.P}_C{args.C:g}")
 
     full = corpus[(corpus["kind"] == "full") & corpus["keep"] & corpus.patient_id.isin(fit_pids)]
-    low = corpus[(corpus["kind"] == "low") & corpus["keep"] & corpus.patient_id.isin(fit_pids)]
     by_full = slices_by_patient(full)
-    by_low = slices_by_patient(low)
+    # reduced dose: the slices at the same positions as the kept full-dose
+    # ones, from the cache extracted on the full-dose masks
+    pairs = dose_pairs(corpus, fit_pids)
+    by_low: dict[str, list[str]] = {}
+    for r in pairs.itertuples():
+        by_low.setdefault(r.patient_id, []).append(r.path_low)
+    both = MergedCache(cache, FeatureCache(low_cache_dir(args.P, args.C)))
 
     meta = full.groupby("patient_id").agg(
         cell=("cell", "first"), manufacturer=("manufacturer", "first"),
@@ -197,7 +205,7 @@ def main() -> int:
     # --- upper anchor: paired dose contrast ---------------------------------
     dose_pids = sorted(set(by_low) & set(by_full))
     d_dose, null_dose, m_full_d, m_low_d = paired_dose_anchor(
-        cache, by_full, by_low, dose_pids, args.p, args.B, args.seed)
+        both, by_full, by_low, dose_pids, args.p, args.B, args.seed)
     anchor_excess = d_dose - float(np.nanmedian(null_dose))
     print(f"\nUPPER ANCHOR (full vs reduced dose, {len(dose_pids)} paired patients):")
     print(f"  D = {d_dose:.4f}, paired null median {np.nanmedian(null_dose):.4f}, "
@@ -251,7 +259,7 @@ def main() -> int:
               f"p={r['p_perm']:.3f} eta={r['eta']:+.3f}", flush=True)
 
     rows.append({
-        "contrast": "ANCHOR: full vs reduced dose (same patients)",
+        "contrast": "ANCHOR: full vs reduced dose (same slices)",
         "axis": "dose", "n_A": len(dose_pids), "n_B": len(dose_pids),
         "D_obs": d_dose, "null_median": float(np.nanmedian(null_dose)),
         "null_p95": float(np.nanpercentile(null_dose, 95)),

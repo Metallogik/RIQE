@@ -77,9 +77,11 @@ def _one(job: tuple):
     }
     if low_path:
         hul, padl, _ = read_hu(str(ROOT / low_path))
-        fovl, bodyl = masks_for(hul, padl)
+        # the reduced-dose image is the same slice: it is calibrated and
+        # scored on the full-dose masks, since its own body mask fragments
+        # under noise and would change the domain with the dose
         low_entries = build_bank(
-            hul, bodyl, source="low", seed=seed + 5000,
+            hul, body, source="low", seed=seed + 5000,
             noise_sigmas=(), blur_sigmas=(),  # on reduced dose only denoisers matter
         )
         rec["low"] = {
@@ -132,7 +134,7 @@ def main() -> int:
         if r.patient_id in lows:
             gl = lows[r.patient_id]
             j = int(np.abs(gl["z"].to_numpy() - r.z).argmin())
-            if abs(float(gl["z"].iloc[j]) - r.z) <= max(float(r.slice_thickness), 1.0):
+            if abs(float(gl["z"].iloc[j]) - r.z) <= 0.01:
                 low_path, low_sop = gl["path"].iloc[j], gl["sop_uid"].iloc[j]
         jobs.append((r.path, r.patient_id, r.sop_uid, r.cell,
                      args.seed + 97 * i, "full", low_path, low_sop))

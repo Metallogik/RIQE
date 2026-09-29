@@ -17,17 +17,21 @@ fraction of images on which the deepest network is ranked the best denoiser:
 that assumes the answer and uses it as the target.
 
 REVISED CRITERION, declared as such. The criterion above was blind to the most
-important property -- the ordering of real reduced-dose images -- and selected
+important property -- the ordering of reduced-dose images -- and selected
 a setting that ranks it correctly in fewer than half of the abdominal
 validation pairs.
 After inspecting validation data, and before touching the test set, the
 criterion becomes:
 
-  1. REAL DOSE. Fraction of (full dose, real reduced dose, same slice) pairs in
+  1. REDUCED DOSE. Fraction of (full dose, reduced dose, same slice) pairs in
      which the reduced-dose image scores worse, taken as the minimum over chest
-     and abdomen. Pass threshold 0.95.
-  2. OVERFILTERING. Fraction of filtered images scoring better than the
-     original: lowest.
+     and abdomen. Pass threshold 0.95. The reduced-dose reconstructions of the
+     collection are simulated by projection-domain noise insertion (Moen et
+     al., Med Phys 2021), not acquired at lower dose.
+  2. FILTERED FULL-DOSE PREFERENCE. Fraction of filtered images scoring better
+     than the original: lowest. A full-dose image still contains noise, so this
+     is a preference rate rather than an error count; the first criterion's
+     demand that it be zero is kept above as it was declared.
   3. RELATIVE NOISE. Fraction of images with added noise >= 20% of native noise
      that score worse: highest.
   4. STABILITY, then patches per image.
@@ -65,7 +69,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from riqe.cache import FeatureCache  # noqa: E402
-from riqe.dosetest import dose_ordering, dose_pairs, image_moments, summarize  # noqa: E402
+from riqe.dosetest import dose_ordering, dose_pairs, low_cache_dir, pair_moments, summarize  # noqa: E402
 from riqe.model import RCOND, mahalanobis_mixed, model_divergence  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -145,9 +149,9 @@ def main() -> int:
     slices_tab = pd.read_parquet(ROOT / "corpus" / "slices.parquet").set_index("path")
     sigma_nat = slices_tab["body_sigma_med"]
 
-    # real-dose pairs on the inner validation split
+    # reduced-dose pairs on the inner validation split
     pairs = dose_pairs(corpus, split["val_inner"])
-    print(f"real-dose pairs (validation): {len(pairs)} "
+    print(f"reduced-dose pairs (validation): {len(pairs)} "
           f"(chest {int((pairs.region=='chest').sum())}, abdomen {int((pairs.region=='abdomen').sum())})")
 
     # rows of interest, per setting
@@ -159,7 +163,7 @@ def main() -> int:
         cache = FeatureCache(ROOT / "data" / "features" / f"P{P}_C{C:g}")
         sub = full_rows[(full_rows.P == P) & (full_rows.C == C)]
         orig = {r.slice_path: r.Index for r in sub[sub.kind == "original"].itertuples()}
-        pair_moments = image_moments(cache, list(pairs.path_full) + list(pairs.path_low))
+        moments_pairs = pair_moments(cache, FeatureCache(low_cache_dir(P, C)), pairs)
         noise = sub[sub.kind.isin(["noise_white", "noise_fbp", "noise_rel"])].copy()
         sn = noise["slice_path"].map(sigma_nat).to_numpy(dtype=float)
         noise["rel"] = np.sqrt(sn ** 2 + noise["sigma_hu"].to_numpy(dtype=float) ** 2) / sn - 1.0
@@ -208,8 +212,8 @@ def main() -> int:
             mono_mean = float(np.nanmean(list(mono.values())))
             mono_min = float(np.nanmin(list(mono.values())))
 
-            # --- real dose ----------------------------------------------------
-            dsum = summarize(dose_ordering(model, pairs, pair_moments))
+            # --- reduced dose -------------------------------------------------
+            dsum = summarize(dose_ordering(model, pairs, moments_pairs))
 
             # --- relative noise -----------------------------------------------
             s_n = score_rows(model, NU, SG, list(noise.index))
@@ -287,17 +291,17 @@ def main() -> int:
           f"overfiltering {100*best_o.frac_overfilter_fail:.1f}%)")
 
     # --- 2. REVISED criterion -------------------------------------------------
-    print("\n=== revised criterion (real dose first) ===")
+    print("\n=== revised criterion (reduced dose first) ===")
     passing = df[df["dose_correct_min"] >= DOSE_PASS]
     if len(passing):
-        print(f"settings ranking real dose correctly >= {DOSE_PASS:.0%} in both regions: "
+        print(f"settings ranking reduced dose correctly >= {DOSE_PASS:.0%} in both regions: "
               f"{len(passing)}/{len(df)}")
         ranked = passing.sort_values(
             ["frac_overfilter_fail", "rel_noise_detected", "d_boot_median", "fit_patches_per_slice"],
             ascending=[True, False, True, False])
     else:
-        print(f"NO setting ranks real dose correctly >= {DOSE_PASS:.0%} in both regions: "
-              f"ranking by dose, then overfiltering.")
+        print(f"NO setting ranks reduced dose correctly >= {DOSE_PASS:.0%} in both regions: "
+              f"ranking by dose, then filtered-image preference.")
         ranked = df.sort_values(
             ["dose_correct_min", "frac_overfilter_fail", "rel_noise_detected", "d_boot_median"],
             ascending=[False, True, False, True])
@@ -306,11 +310,12 @@ def main() -> int:
 
     (ROOT / "experiments" / "hparam_choice.json").write_text(json.dumps({
         "P": int(best.P), "C": float(best.C), "p": float(best.p),
-        "criterion": ("revised: real-dose ordering (min over chest/abdomen, pass >= 0.95), "
-                      "then overfiltering failure fraction, then relative-noise detection, "
+        "criterion": ("revised: reduced-dose ordering (projection-domain simulated; min over "
+                      "chest/abdomen, pass >= 0.95), then filtered full-dose preference rate, "
+                      "then relative-noise detection, "
                       "then bootstrap stability, then patches per slice"),
         "declared_before_run": False,
-        "revision_reason": ("the pre-declared criterion ignored real-dose ordering and selected "
+        "revision_reason": ("the pre-declared criterion ignored reduced-dose ordering and selected "
                             "a configuration ordering reduced-dose abdomen correctly in "
                             f"{100 * best_o.dose_correct_abdomen:.1f}% of validation pairs; "
                             "revised after seeing validation data and before using the test set"),
