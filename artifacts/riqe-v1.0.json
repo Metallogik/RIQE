@@ -38487,9 +38487,9 @@
   }
  ],
  "code": {
-  "package_sha256": "3d7290b1bf0abd08839f84a7c9b274df7b9e9fe87722d79f818cbe4fcf2ee5af",
+  "package_sha256": "fbcc2ed815ea7573de64d03ec30935acae4bca77c0e87c8f4fe962662d300e7f",
   "files": {
-   "__init__.py": "cda4dbab1acc4ec811eaa0fd046d66210091b94b1f8d515d7461ae32de8ed933",
+   "__init__.py": "3f47ea77ce0460316f14c75ad9ddaa746c08cd9b137e476cf89c96c934964cb3",
    "bank.py": "3c1a8dd5079321630b908e0e3cc695bb01658b4a37955604715bb6a348033f72",
    "cache.py": "60584b79ac97a9acc691c056bfd77bfc3ca1514c9969dd1eb6954fa4102c4cc8",
    "degrade.py": "e00253c0d9b78452532248bd34c76ee610e09f895f50c71f30e855af9b4be977",
@@ -38504,7 +38504,7 @@
    "nss.py": "4ea83a96ad3b09a61a3f4ca1f642723776e9bb6afa8673b21290ed1eb41e1d31",
    "tcia.py": "4d2e03aa059454ba74a1ce1d8cb21eac9070500c46e9e7e04e7ad164fe0050ca"
   },
-  "git_commit": "8f1104ec5093aeabd459ec9c97698346683d267d",
+  "git_commit": "3c4ef9d5c78f284f5832aaae4002f8a23ca7204b",
   "python": "3.12.3",
   "numpy": "2.5.3",
   "scipy": "1.18.1",
