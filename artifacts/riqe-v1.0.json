@@ -1,6 +1,6 @@
 {
  "model_id": "riqe-v1.0",
- "created": "2026-09-28",
+ "created": "2026-09-29",
  "description": "NIQE-style no-reference reference model, fitted on full-dose CT. The score is a distance from this model, not an absolute judgement of diagnostic quality: the model does not know what a lesion is, and its values are not comparable with NIQE values in the literature.",
  "license": {
   "model": "CC BY 4.0",
@@ -38487,24 +38487,24 @@
   }
  ],
  "code": {
-  "package_sha256": "2dc9bea003d577e7995b47f432945ce94b679e2a5f5f742dc7ac94b816d402ab",
+  "package_sha256": "3d7290b1bf0abd08839f84a7c9b274df7b9e9fe87722d79f818cbe4fcf2ee5af",
   "files": {
    "__init__.py": "cda4dbab1acc4ec811eaa0fd046d66210091b94b1f8d515d7461ae32de8ed933",
    "bank.py": "3c1a8dd5079321630b908e0e3cc695bb01658b4a37955604715bb6a348033f72",
    "cache.py": "60584b79ac97a9acc691c056bfd77bfc3ca1514c9969dd1eb6954fa4102c4cc8",
-   "degrade.py": "9d9461d9a77744940eeb79d301f9016223a043c410658e493946c0cc0c5855b0",
+   "degrade.py": "e00253c0d9b78452532248bd34c76ee610e09f895f50c71f30e855af9b4be977",
    "dicomio.py": "9e26b78118872398e9d0f3d8d4226c0c7e7dd122909d039a085c389aeae8ed1f",
    "dosetest.py": "948674930400da0c72584dbbe813907ed9f511bf2647e6cad25f1dcecbf7ce4a",
    "evaluate.py": "f27b29b3284fc6c5bb3c0e19bf451a6758eb3b88821189d70e6dd1184792d176",
    "extract.py": "05c889a5d7f65b634a8a85db59e6acc59b9b85797d9ba6579a3f4844231fb4ac",
-   "figstyle.py": "7173ee8bcb30f2f075aae07d166ca85ce964b0842083bea68c9189d518395270",
+   "figstyle.py": "a1147f4d31b6e4acd3189767dce927d71f7c53eb1618e25c092ac78a10362a5a",
    "hu.py": "ba1ff78f31d4afbdff6cdc08fac2d0c56d47ddc2043d92aae5e20d7a0caf6706",
    "inclusion.py": "51d8daa2a38b8685b583424e35203937ffd5aa122b80e708e8ca3a286296ebae",
    "model.py": "e1312f9093b7830f38e96d36ac744111585e5e13da1f0177e47a81cd9b1dccec",
    "nss.py": "4ea83a96ad3b09a61a3f4ca1f642723776e9bb6afa8673b21290ed1eb41e1d31",
    "tcia.py": "4d2e03aa059454ba74a1ce1d8cb21eac9070500c46e9e7e04e7ad164fe0050ca"
   },
-  "git_commit": "8ec086263fdfa0aa64738476d361686cb242bfbc-dirty",
+  "git_commit": "8f1104ec5093aeabd459ec9c97698346683d267d",
   "python": "3.12.3",
   "numpy": "2.5.3",
   "scipy": "1.18.1",
