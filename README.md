@@ -1,5 +1,7 @@
 # RIQE
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23055558.svg)](https://doi.org/10.5281/zenodo.23055558)
+
 **R**adiology **I**mage **Q**uality **E**valuator, for computed tomography.
 
 RIQE is a NIQE-style no-reference image quality model fitted on CT instead of
@@ -234,8 +236,14 @@ the final battery.
 
 ## Citation and licence
 
-Code: [MIT](LICENSE). Model, manifests and results:
-[CC BY 4.0](LICENSE-MODEL).
+Code: [MIT](LICENSE). Model and manifests: [CC BY 4.0](LICENSE-MODEL).
+
+Cite the archived release:
+
+> Mattiussi, F. (2026). RIQE: a NIQE-style reference model for Computed
+> Tomography (v1.0) [Software]. Zenodo. https://doi.org/10.5281/zenodo.23055559
+
+To refer to all versions, use https://doi.org/10.5281/zenodo.23055558.
 
 Any use of the model must also cite the data it was fitted on, as CC BY 4.0
 requires:
