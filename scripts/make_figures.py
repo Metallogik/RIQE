@@ -338,8 +338,8 @@ def fig_examples() -> None:
         imgs.append((label, img[y0:y1, x0:x1], sc))
 
     ps = meta["pixel_spacing"]
-    # zoom on the two larger lesions, 24 mm wide
-    zc = np.mean(sites[:2], axis=0).round().astype(int)
+    # zoom on the 4 mm lesion, the one the central result is about, 24 mm wide
+    zc = np.asarray(sites[2]).round().astype(int)
     zh = int(round(12.0 / ps))
     zy0, zx0 = int(zc[0] - zh), int(zc[1] - zh)
     fig, axes = plt.subplots(2, 4, figsize=(FULL_WIDTH, 4.1), layout="constrained")
@@ -390,7 +390,7 @@ def fig_lesions() -> None:
     den = den[den.diameter_mm == dmm]
     den["preferred"] = den.riqe < den.base
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(FULL_WIDTH, 2.8), layout="constrained")
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(FULL_WIDTH, 2.7), layout="constrained")
     for i, name in enumerate(ORDER):
         g = den[den.denoiser == name]
         a = g.groupby("target_residual_hu")["preferred"].mean() * 100
@@ -405,7 +405,25 @@ def fig_lesions() -> None:
     ax2.set_ylim(0, 1.05)
     ax2.axhline(0.5, color=fs.MUTED, lw=0.8, ls="--", zorder=1)
     ax2.legend(loc="lower left", handlelength=2.6)
-    for ax in (ax1, ax2):
+
+    # C: detectability index with patient-bootstrap intervals (uncertainty.py)
+    # for the unfiltered input and the two filters compared in the text
+    u = json.loads((EXP / "uncertainty.json").read_text())["lesions_4mm"]
+    ref = u["none"]["dprime"]
+    ax3.axhspan(ref["ci_low"], ref["ci_high"], color=fs.LIGHT, zorder=0)
+    ax3.axhline(ref["estimate"], color=fs.MUTED, lw=0.8, ls="--", zorder=1, label="Unfiltered")
+    for name in ("gaussian", "bilateral"):
+        lv = sorted(float(k.split("|")[1]) for k in u if k.startswith(name + "|"))
+        e = [u[f"{name}|{v:g}"]["dprime"] for v in lv]
+        est = np.array([x["estimate"] for x in e])
+        err = np.array([[x["estimate"] - x["ci_low"] for x in e], [x["ci_high"] - x["estimate"] for x in e]])
+        ax3.errorbar(lv, est, yerr=err, label=NICE[name], capsize=2, elinewidth=0.8,
+                     **fs.style_for(ORDER.index(name)))
+    fs.panel(ax3, "C", "Detectability index $d'$")
+    ax3.set_ylabel("Median $d'$ (NPW matched filter)")
+    ax3.set_ylim(0, None)
+    ax3.legend(loc="lower left", handlelength=2.6)
+    for ax in (ax1, ax2, ax3):
         ax.set_xlabel("Residual standard deviation (HU)")
         log2_axis(ax, [2, 4, 8, 16, 32, 64])
         fs.clean(ax)

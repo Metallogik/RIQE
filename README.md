@@ -43,9 +43,9 @@ selection). Intervals are 95% bootstrap intervals over patients.
 | Noise added at ≥ +20% of the native noise, detected | 97.5–100% |
 | Gaussian blur σ = 0.5 px / ≥ 1 px, detected | 49.2% chest, 92.5% abdomen / 99–100% |
 | Filtered full-dose images scoring *better* than the unfiltered original | 41.2% [34.8, 48.3]; 27.8% counting only changes > 0.05 |
-| Bilateral filter preferred to the unfiltered image, 4 mm +10 HU lesion (18 slices, 64 noise realisations) | 18/18 images up to 32 HU residual, where 29% [25, 32] of the lesion signal is left and d′ falls from 0.51 to 0.33 |
+| Bilateral filter preferred to the unfiltered image, 4 mm +10 HU lesion (18 slices, 64 noise realisations) | 18/18 images up to a 32 HU residual, where 29% [25, 32] of the lesion signal is left and d′ falls from 0.51 to 0.33 |
 | Gaussian filter preferred to the unfiltered image | never, although at 32 HU it keeps 70% of the signal and d′ 0.48 (bilateral − Gaussian d′: −0.17 [−0.19, −0.14]) |
-| Rank correlation with radiologists, LDCTIQAC 2023 (1000 images; exploratory, patients not identifiable, intervals over inferred source slices) | within one source slice: median −0.47 [−0.54, −0.30]; pooled: −0.24 [−0.32, −0.17] |
+| Rank correlation with radiologists, LDCTIQAC 2023 (1000 images; exploratory, patients not identifiable, intervals over inferred source-slice groups) | within one inferred group: median −0.47 [−0.54, −0.30]; pooled: −0.24 [−0.32, −0.17] |
 | Same code fitted on 119 CC0 photographs, RIQE settings: reduced dose ranked worse, abdomen | 31.2% |
 | Same code fitted on the photographs with the NIQE parameters (P = 96, C = 1): reduced dose ranked worse, abdomen | 0% |
 | Stability: rank Spearman between bootstrap models | 0.99 |

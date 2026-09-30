@@ -221,7 +221,7 @@ def t_baselines() -> None:
         row("Noise +100\\% of native detected (\\%)", [f"{dr[a]['noise_+100%']:.1f}" for a, _, _ in cols]),
         row("Filtered full-dose preferred (\\%)", [f"{100 * v.loc[b].overfilter_failure_fraction:.1f}" for _, b, _ in cols]),
         row("LDCTIQAC: Spearman, pooled", [rho(k) for _, _, k in cols]),
-        row("LDCTIQAC: Spearman within slice", [within(k) for _, _, k in cols]),
+        row("LDCTIQAC: within inferred group", [within(k) for _, _, k in cols]),
     ]
     nq = s5["niqe_parameters_model"]
     table("tab_baselines",
@@ -231,8 +231,10 @@ def t_baselines() -> None:
           "reference NIQE model fitted on the LIVE photographs is not used. Rows 1--5: held-out test "
           "split. Rows 6--7: the LDCTIQAC~2023 training images, decoded as $\\mathrm{HU} = 1400x - "
           "1000$; 95\\% intervals resample the inferred source slices; negative is the expected sign "
-          "(lower score = closer to the reference). Within-slice: rank correlation among the degraded "
-          "versions of one source slice, median over slices.",
+          "(lower score = closer to the reference). Within inferred group: rank correlation among the "
+          "images of one group inferred from image similarity (the degraded versions of one source "
+          "slice or of a few adjacent ones), median over groups. LDCTIQAC patients cannot be "
+          "identified: these rows are exploratory.",
           "tab:photo", "lccc", "& RIQE & Photographs, & Photographs, \\\\\n"
           "& (CT) & RIQE settings & NIQE parameters", rows, sep="3.5pt")
 
@@ -277,8 +279,11 @@ def t_flow() -> None:
         f"{s6['models']['riqe']['n_scored']} images \\\\",
     ]
     table("tab_flow",
-          "Denominators. Patients are the unit of the split and of every confidence interval. "
-          "Unscoreable: fewer than 72 valid patches in the image domain.",
+          "Denominators. On the TCIA data, patients are the unit of the split and of every "
+          "confidence interval; LDCTIQAC patients cannot be identified, and its intervals resample "
+          "inferred source-slice groups (Section~\\ref{sec:stats}). Unscoreable: fewer than 72 valid "
+          "patches in the image domain, the rule of RIQE; the baseline with the NIQE parameters "
+          "uses its own rule (Section~\\ref{sec:baselines}).",
           "tab:flow", "".join(f">{{\\raggedright\\arraybackslash}}p{{{w}cm}}" for w in (2.6, 3.3, 3.6, 1.9, 2.6)),
           "Experiment & Available & Selection & Excluded & Analysed (patients / units)", rows)
 
