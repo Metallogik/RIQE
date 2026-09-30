@@ -1,6 +1,6 @@
 {
  "model_id": "riqe-v1.0",
- "created": "2026-09-29",
+ "created": "2026-09-30",
  "description": "NIQE-style no-reference reference model, fitted on full-dose CT. The score is a distance from this model, not an absolute judgement of diagnostic quality: the model does not know what a lesion is, and its values are not comparable with NIQE values in the literature.",
  "license": {
   "model": "CC BY 4.0",
@@ -38487,10 +38487,10 @@
   }
  ],
  "code": {
-  "package_sha256": "cfe85c73f8ab16b117ee4c925b5d4ccc04f96f433c00bc8d6f24cc802726db15",
+  "package_sha256": "e81544db85fcc218bd39992edbffc47f380d213a213f52340ee78387de8c0dd7",
   "files": {
    "__init__.py": "3f47ea77ce0460316f14c75ad9ddaa746c08cd9b137e476cf89c96c934964cb3",
-   "bank.py": "3c1a8dd5079321630b908e0e3cc695bb01658b4a37955604715bb6a348033f72",
+   "bank.py": "a2d2cbd128838fd8e9d2d1810f26d94ef2b4a9d6cb27d6753d826b38ec29938f",
    "cache.py": "75415e9a1cf5a23305b7ad9f58953a4e5c616bca37869fe8ee60f7b04533ee96",
    "degrade.py": "99b60ff3a36101e1d57b666796311a330d928fc0a7f6472201672b5bd4416d8d",
    "dicomio.py": "9e26b78118872398e9d0f3d8d4226c0c7e7dd122909d039a085c389aeae8ed1f",
@@ -38505,7 +38505,7 @@
    "nss.py": "4ea83a96ad3b09a61a3f4ca1f642723776e9bb6afa8673b21290ed1eb41e1d31",
    "tcia.py": "4d2e03aa059454ba74a1ce1d8cb21eac9070500c46e9e7e04e7ad164fe0050ca"
   },
-  "git_commit": "8ed616605ec0978480a579c81eaeda936616eb65",
+  "git_commit": "73a1d420524cc80821d2b092416f650e78ad77fe",
   "python": "3.12.3",
   "numpy": "2.5.3",
   "scipy": "1.18.1",
