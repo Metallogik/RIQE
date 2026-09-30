@@ -70,15 +70,31 @@ def t_detection() -> None:
     for sp in (0.5, 1.0, 2.0):
         rows.append(f"Gaussian blur, $\\sigma={sp:g}$ px & {ci(u['blur'].get(f'chest|{sp:g}'))} & "
                     f"{ci(u['blur'].get(f'abdomen|{sp:g}'))} \\\\")
-    nd = d["chest"]
+    pa = u["dose_patients_all_correct"]
+
+    def allp(e):
+        return (f"{e['k']}/{e['n']} {{\\scriptsize [{100 * e['ci_low']:.1f}, "
+                f"{100 * e['ci_high']:.1f}]}}")
+
+    rows.insert(1, f"\\quad patients with every pair correct & {allp(pa['chest'])} & {allp(pa['abdomen'])} \\\\")
+    full_rows = [e for k in ("relative_noise_patients_all_correct", "blur_patients_all_correct")
+                 for e in u[k].values() if e["k"] == e["n"]]
+    n20 = full_rows[0] if full_rows else None
     table("tab_detection",
           "Paired ranking of degraded images on the held-out test split. Percentage of pairs "
           "in which the degraded image scores worse than its source (100\\% is correct), with "
           "95\\% confidence intervals from a bootstrap over patients. Reduced dose: "
           f"{d['chest']['n']} chest and {d['abdomen']['n']} abdominal pairs from "
-          f"{nd['n_patients']} patients each, reconstructions simulated "
-          "by the data providers through projection-domain noise insertion. Added noise and blur: "
-          "240 full-dose slices from 40 patients (120 chest, 120 abdomen).",
+          f"{d['chest']['n_patients']} and {d['abdomen']['n_patients']} patients, reconstructions "
+          "simulated by the data providers through projection-domain noise insertion. Added noise "
+          "and blur: 240 full-dose slices from 40 patients (120 chest and 120 abdomen, 20 patients "
+          "each). When every patient is at 100\\%, the bootstrap interval collapses to [100, 100] "
+          "and expresses no uncertainty; the second row gives instead the patients in which every "
+          "pair is correct, with an exact binomial interval"
+          + (f" (for the rows at 100\\% with 20 patients: {n20['k']}/{n20['n']}, "
+             f"[{100 * n20['ci_low']:.1f}, {100 * n20['ci_high']:.1f}])" if n20 else "")
+          + ". That is the probability that all pairs of a patient are correct, not the rate of "
+          "correct pairs.",
           "tab:detection", "lcc", "Degradation & Chest (\\%) & Abdomen (\\%)", rows)
 
 
@@ -122,11 +138,13 @@ def t_lesions() -> None:
                  for l in lv]
         rows.append(f"{NICE[n]} & " + " & ".join(cells) + r" \\")
     noise = float(d.noise_sigma_hu.median())
+    noise_loc = float(d.noise_local_sigma_hu.median()) if "noise_local_sigma_hu" in d else noise
     table("tab_lesions",
           "Metric preference against lesion signal. Substrate: " + str(d.slice_path.nunique())
           + " held-out full-dose abdominal slices (" + str(f.slice_path.nunique())
           + " with room for the 4\\,mm lesions), one per patient, plus FBP-like noise at the level "
-          f"measured between full-dose and simulated quarter-dose abdominal images ({noise:.1f}\\,HU); "
+          "that separates full-dose from simulated quarter-dose abdominal images (local standard "
+          f"deviation {noise_loc:.1f}\\,HU, global {noise:.1f}\\,HU); "
           f"{json.loads((EXP / 'exp2_form2_summary.json').read_text())['realizations']} noise "
           "realisations per condition. Each cell: percentage of images in which RIQE scores the "
           "filtered image better than the unfiltered one / median fraction of the matched-filter "

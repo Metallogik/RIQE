@@ -42,6 +42,20 @@ def boot(frame: pd.DataFrame, stat, cluster: str = "patient_id") -> dict:
             "n": int(len(frame)), "n_patients": int(len(idx))}
 
 
+def all_correct_patients(frame: pd.DataFrame, col: str) -> dict:
+    """Patients in which every unit is correct, with the exact (Clopper-Pearson)
+    95% interval. When every patient is at 100%, the percentile bootstrap of the
+    pooled rate collapses to [100, 100], which expresses no uncertainty; this
+    endpoint does. It is a different quantity: the probability that all units
+    of a patient are correct, not the rate of correct units."""
+    from scipy.stats import binomtest
+
+    per = frame.groupby("patient_id")[col].min()
+    k, n = int((per == 1).sum()), int(len(per))
+    ci = binomtest(k, n).proportion_ci(confidence_level=0.95, method="exact")
+    return {"k": k, "n": n, "ci_low": float(ci.low), "ci_high": float(ci.high)}
+
+
 def prop(col):
     return lambda f: float(f[col].mean())
 
@@ -60,6 +74,8 @@ def main() -> int:
     # --- reduced dose (projection-domain simulated) --------------------------
     d0 = pd.read_csv(EXP / "exp0_real_dose.csv").dropna(subset=["correct"])
     out["dose"] = {reg: boot(g, prop("correct")) for reg, g in d0.groupby("region")}
+    out["dose_patients_all_correct"] = {reg: all_correct_patients(g, "correct")
+                                        for reg, g in d0.groupby("region")}
     if (EXP / "exp0_original_criterion.csv").exists():
         d0o = pd.read_csv(EXP / "exp0_original_criterion.csv").dropna(subset=["correct"])
         out["dose_original_criterion"] = {reg: boot(g, prop("correct")) for reg, g in d0o.groupby("region")}
@@ -68,6 +84,9 @@ def main() -> int:
     rel = pd.read_csv(EXP / "exp1b_relative_noise.csv")
     out["relative_noise"] = {f"{reg}|{lv:g}": boot(g, prop("worse"))
                              for (reg, lv), g in rel.groupby(["region", "rel_increase"])}
+    out["relative_noise_patients_all_correct"] = {
+        f"{reg}|{lv:g}": all_correct_patients(g, "worse")
+        for (reg, lv), g in rel.groupby(["region", "rel_increase"])}
     bs = pd.read_csv(EXP / "battery_scores.csv")
     full = bs[bs.source == "full"].copy()
     orig = full[full.kind == "original"].set_index("slice_path")["score"]
@@ -77,6 +96,8 @@ def main() -> int:
     bl = bl.dropna(subset=["score"])
     out["blur"] = {f"{reg}|{s:g}": boot(g, prop("worse"))
                    for (reg, s), g in bl.groupby(["region", "sigma_px"])}
+    out["blur_patients_all_correct"] = {f"{reg}|{s:g}": all_correct_patients(g, "worse")
+                                        for (reg, s), g in bl.groupby(["region", "sigma_px"])}
 
     # --- preference for filtered full-dose images -------------------------------
     f1 = pd.read_csv(EXP / "exp2_form1_overfiltering.csv")

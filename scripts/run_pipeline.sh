@@ -87,6 +87,8 @@ step photo_sanity experiments/photo_sanity.json \
 if [ -e data/ldctiqac/LDCTIQAG2023_train/train.json ]; then
   step ldctiqac experiments/exp6_ldctiqac_summary.json \
     $PY scripts/exp6_ldctiqac.py --workers "$W"
+  step ldctiqac_groups experiments/ldctiqac_group_sensitivity.csv \
+    $PY scripts/ldctiqac_groups_check.py
 else
   echo "[$(date +%H:%M:%S)] skipping ldctiqac: data/ldctiqac/LDCTIQAG2023_train not found"
 fi

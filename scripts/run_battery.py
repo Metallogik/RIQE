@@ -187,21 +187,27 @@ def exp1_monotonicity(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             rhos.append(spearman(xs, seq))
             detail.append({"kind": kind, "slice_path": sp, "monotone": ok,
                            "spearman": rhos[-1], **{f"s{j}": v for j, v in enumerate(seq)}})
-        # sign test between consecutive levels
+        # sign test between consecutive levels, on the patient means of the
+        # score change: the slices of one patient are not independent
+        pid_of = d.drop_duplicates("slice_path").set_index("slice_path")["patient_id"]
         pvals = {}
         prev_lab, prev = "original", np.array([orig.get(sp, np.nan) for sp in sorted(orig)])
         prev_idx = sorted(orig)
         for lv in levels:
             cur = g[g[param] == lv].set_index("slice_path")["score"]
             cur = np.array([cur.get(sp, np.nan) for sp in prev_idx])
-            k, n, p = sign_test(cur, prev)
+            ok = np.isfinite(cur) & np.isfinite(prev)
+            k, n = int((cur[ok] > prev[ok]).sum()), int(ok.sum())
+            by_patient = pd.Series(cur - prev).groupby(pid_of.reindex(prev_idx).to_numpy()).mean()
+            kp, npat, p = sign_test(by_patient.to_numpy(), np.zeros(len(by_patient)))
             # the key includes the ladder: "original -> 5HU" appears in both
             # noise_white and noise_fbp, and a key on the step alone would let
             # the second overwrite the correction of the first
             pvals[(kind, f"{prev_lab} -> {lv:g}{unit}")] = p
             rows.append({"ladder": kind, "step": f"{prev_lab} -> {lv:g}{unit}",
                          "n_worse": k, "n_valid": n,
-                         "fraction_worse": k / n if n else np.nan, "p_sign": p})
+                         "fraction_worse": k / n if n else np.nan,
+                         "patients_worse": kp, "n_patients": npat, "p_sign_patients": p})
             prev, prev_lab = cur, f"{lv:g}{unit}"
         adj = holm(pvals)
         for r in rows:
@@ -212,7 +218,8 @@ def exp1_monotonicity(d: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
               f"({100*perfect/max(total,1):.1f}%), median Spearman {np.nanmedian(rhos):+.3f}")
         for r in [x for x in rows if x["ladder"] == kind]:
             print(f"    {r['step']:28s} worse in {r['n_worse']:3d}/{r['n_valid']:3d} "
-                  f"({100*r['fraction_worse']:5.1f}%)  p_Holm={r.get('p_holm', np.nan):.3g}")
+                  f"({100*r['fraction_worse']:5.1f}%); patients {r['patients_worse']}/{r['n_patients']}, "
+                  f"p_Holm={r.get('p_holm', np.nan):.3g}")
     df = pd.DataFrame(rows)
     det = pd.DataFrame(detail)
     summary = {
@@ -292,10 +299,15 @@ def exp2_overfiltering(d: pd.DataFrame, model, NU) -> tuple[pd.DataFrame, dict]:
                                         patient_id=("patient_id", "first"))
         g = g.dropna()
         k, n = int((g.delta < 0).sum()), int(len(g))
+        # the sign test counts patients, not slices: the six slices of one
+        # patient are not independent observations
+        gp = g.groupby("patient_id")["delta"].mean()
+        kp, npat = int((gp < 0).sum()), int(len(gp))
         rows3.append({"region": reg, "sigma_hu": float(sig), "n_images": n,
-                      "n_patients": int(g.patient_id.nunique()),
+                      "n_patients": npat,
                       "fraction_better": k / n if n else np.nan,
-                      "p_sign": binomtest(k, n, 0.5).pvalue if n else np.nan,
+                      "patients_better": kp,
+                      "p_sign_patients": binomtest(kp, npat, 0.5).pvalue if npat else np.nan,
                       "median_delta": float(g.delta.median()),
                       "fraction_better_refcov": float((g.delta_refcov < 0).mean()),
                       "noise_floor": float(floor.get(sig, np.nan))})

@@ -33,9 +33,15 @@ ensemble; it does not remove the interaction between anatomy and a
 non-linear filter. The matched filter is a model observer without an eye
 filter or internal noise, not calibrated to human performance.
 
-Substrate: full-dose slices plus FBP-like noise at the level measured
-between full-dose and reduced-dose (projection-domain simulated) abdominal
-images.
+Substrate: full-dose slices plus FBP-like noise at the level that separates
+full-dose from reduced-dose (projection-domain simulated) abdominal images.
+That level is an operational estimate in the units of the local estimator
+(7x7 window): sqrt(med sigma_low^2 - med sigma_full^2) over the medians of
+the local standard deviation inside the body. The generator is set in global
+units, so its global sigma is that value divided by the ratio between local
+and global sigma of the synthetic noise (0.637, riqe.bank.fbp_local_ratio).
+An earlier version passed the local value as the global one, adding noise
+with a local sigma of 0.637 x 18.4 = 11.7 HU instead of 18.4 HU.
 
 Everything is reported per denoiser as well as pooled: pooling over denoisers
 averages a filter the metric rejects (Gaussian) with one it prefers
@@ -69,6 +75,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from riqe import degrade as dg  # noqa: E402
+from riqe.bank import fbp_local_ratio  # noqa: E402
 from riqe.cache import FeatureCache  # noqa: E402
 from riqe.dicomio import read_hu  # noqa: E402
 from riqe.extract import MIN_PATCHES_FOR_SCORE, Spec, features_from_hu, masks_for  # noqa: E402
@@ -185,6 +192,7 @@ def _one(job):
             rows.append({
                 "slice_path": path, "cell": cell, "pixel_spacing": ps,
                 "noise_sigma_hu": noise_sigma,
+                "noise_local_sigma_hu": noise_sigma * _G["k"],
                 "denoiser": cname, "target_residual_hu": lvl, "residual_hu": res_hu,
                 "riqe": sc,
                 "riqe_refcov": sc_ref,
@@ -248,7 +256,9 @@ def main() -> int:
             raise SystemExit(f"no reduced-dose measurement for the anatomy of {cell}")
         return float(np.median(vals))
 
-    print("added noise per cell (sigma HU, from full vs reduced dose):")
+    k_loc = fbp_local_ratio()
+    print("added noise per cell (local sigma HU, from full vs reduced dose; "
+          f"global sigma = local / {k_loc:.3f}):")
     for k, v in noise_by_cell.items():
         print(f"  {k:26s} {v:6.1f}")
 
@@ -270,14 +280,15 @@ def main() -> int:
 
     for cell in sorted(set(pick.cell) - set(noise_by_cell)):
         print(f"  {cell:26s} {noise_for(cell):6.1f}  (no reduced-dose pair: value of the same anatomy)")
-    jobs = [(r.path, r.cell, noise_for(r.cell), args.seed + 977 * i)
+    # the generator takes the global sigma; noise_for() is in local units
+    jobs = [(r.path, r.cell, noise_for(r.cell) / k_loc, args.seed + 977 * i)
             for i, r in enumerate(pick.itertuples())]
     spec = Spec(P=P, C=C, p=None)
     t0 = time.time()
     rows = []
     with cf.ProcessPoolExecutor(
         args.workers, initializer=_init,
-        initargs=({"spec": spec, "model": model, "K": args.realizations,
+        initargs=({"spec": spec, "model": model, "K": args.realizations, "k": k_loc,
                    "pinv_ref": np.linalg.pinv(model.sigma, rcond=RCOND)},)
     ) as ex:
         for i, rr in enumerate(ex.map(_one, jobs, chunksize=1), 1):

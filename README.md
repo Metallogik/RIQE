@@ -29,9 +29,9 @@ lesions. The first holds; the second does not.
 **In one sentence:** RIQE ranks a degraded CT image worse than its source
 (simulated dose reduction, added noise, blur), but it **should not be the sole
 criterion to choose, compare or tune a denoiser**. It prefers an
-edge-preserving filter even at strengths that leave half of the signal of a
-small low-contrast lesion, and does not prefer linear smoothing that keeps
-more.
+edge-preserving filter even at strengths that leave less than a third of the
+signal of a small low-contrast lesion, and does not prefer linear smoothing
+that keeps more.
 
 Results on the held-out test split (40 patients never used for fitting or model
 selection). Intervals are 95% bootstrap intervals over patients.
@@ -43,9 +43,9 @@ selection). Intervals are 95% bootstrap intervals over patients.
 | Noise added at ≥ +20% of the native noise, detected | 97.5–100% |
 | Gaussian blur σ = 0.5 px / ≥ 1 px, detected | 49.2% chest, 92.5% abdomen / 99–100% |
 | Filtered full-dose images scoring *better* than the unfiltered original | 41.2% [34.8, 48.3]; 27.8% counting only changes > 0.05 |
-| Bilateral filter preferred to the unfiltered image, 4 mm +10 HU lesion (18 slices, 64 noise realisations) | 18/18 images up to 16 HU residual, where 48% [45, 53] of the lesion signal is left |
-| Gaussian filter preferred to the unfiltered image | never, although it keeps more of the signal (85% at 16 HU) and a higher d′ (bilateral − Gaussian at 16 HU: −0.063 [−0.079, −0.047]) |
-| Rank correlation with radiologists, LDCTIQAC 2023 (1000 images from 69 source slices) | within one source slice: median −0.47 [−0.54, −0.30]; pooled: −0.24 [−0.32, −0.17] |
+| Bilateral filter preferred to the unfiltered image, 4 mm +10 HU lesion (18 slices, 64 noise realisations) | 18/18 images up to 32 HU residual, where 29% [25, 32] of the lesion signal is left and d′ falls from 0.51 to 0.33 |
+| Gaussian filter preferred to the unfiltered image | never, although at 32 HU it keeps 70% of the signal and d′ 0.48 (bilateral − Gaussian d′: −0.17 [−0.19, −0.14]) |
+| Rank correlation with radiologists, LDCTIQAC 2023 (1000 images; exploratory, patients not identifiable, intervals over inferred source slices) | within one source slice: median −0.47 [−0.54, −0.30]; pooled: −0.24 [−0.32, −0.17] |
 | Same code fitted on 119 CC0 photographs, RIQE settings: reduced dose ranked worse, abdomen | 31.2% |
 | Same code fitted on the photographs with the NIQE parameters (P = 96, C = 1): reduced dose ranked worse, abdomen | 0% |
 | Stability: rank Spearman between bootstrap models | 0.99 |
@@ -189,7 +189,9 @@ the final battery.
   lesions.
 - **Confidence intervals** resample patients (bootstrap, B = 2000), since the
   slices, pairs and filtered versions of one patient are not independent.
-  LDCTIQAC intervals resample the inferred source slices.
+  LDCTIQAC does not identify its patients: its analysis is exploratory, with
+  intervals over source slices inferred from image similarity and a
+  sensitivity analysis on the grouping (`scripts/ldctiqac_groups_check.py`).
 - **Denoisers:** Gaussian, total variation, bilateral, non-local means and
   wavelet (scikit-image). Their strength is calibrated per image to the same
   residual standard deviation, from 2 to 64 HU. BM3D is not used (GPL).

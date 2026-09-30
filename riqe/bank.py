@@ -76,7 +76,7 @@ def render(entry: BankEntry, hu: np.ndarray) -> np.ndarray:
 _K_FBP: float | None = None
 
 
-def _fbp_local_ratio() -> float:
+def fbp_local_ratio() -> float:
     """Ratio between the median local sigma and the global sigma of the
     synthetic FBP-like noise, estimated once on fixed-seed realisations."""
     global _K_FBP
@@ -135,7 +135,7 @@ def build_bank(
         # noise, local sigma = 0.637 x global sigma (measured, stable to
         # +-0.002). The added noise must be expressed in the same units as the
         # measurement, otherwise a requested +100% becomes +55%.
-        k = _fbp_local_ratio()
+        k = fbp_local_ratio()
         for i, r in enumerate(noise_rel):
             s_add = sigma_nat * float(np.sqrt((1.0 + r) ** 2 - 1.0)) / k
             entries.append(BankEntry(kind="noise_rel", source=source, sigma_hu=s_add,

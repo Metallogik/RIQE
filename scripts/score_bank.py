@@ -169,8 +169,9 @@ def main() -> int:
         configs=json.dumps(configs),
     )
     n_bad = int(np.isnan(NU[:, 0]).sum())
+    need = niqecfg.MIN_PATCHES if args.niqe_config else MIN_PATCHES_FOR_SCORE
     print(f"wrote {out}: {len(rows)} rows, {n_bad} without a defined score "
-          f"(< {MIN_PATCHES_FOR_SCORE} patches), {(time.time()-t0)/60:.1f} min")
+          f"(< {need} patches), {(time.time()-t0)/60:.1f} min")
     return 0
 
 

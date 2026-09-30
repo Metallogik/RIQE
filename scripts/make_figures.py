@@ -237,7 +237,7 @@ WINDOW = (-65.0, 185.0)
 #: the four conditions shown, all at the same residual
 EXAMPLE_CONDITIONS = (("Noisy input", None), ("Gaussian", "gaussian"), ("NLM", "nlm"),
                       ("Bilateral", "bilateral"))
-EXAMPLE_RESIDUAL = 16.0
+EXAMPLE_RESIDUAL = 32.0
 
 
 def _example_layout(hu, body, ps, rng):
@@ -323,12 +323,15 @@ def fig_examples() -> None:
     imgs = []
     for title, name in EXAMPLE_CONDITIONS:
         if name is None:
-            img, label = noisy + field, title
+            img, label, scored = noisy + field, title, noisy
         else:
             # strength calibrated without lesions, as in the experiment
             s, _, _ = dg.calibrate_strength(noisy, name, EXAMPLE_RESIDUAL, body)
             img, label = dg.apply_denoiser(noisy + field, name, s), f"{title}, {EXAMPLE_RESIDUAL:g} HU residual"
-        pf = features_from_hu(img, pad, spec, fitting=False, masks=(fov, body))
+            scored = dg.apply_denoiser(noisy, name, s)
+        # the score is that of the slice without lesions, as in the experiment;
+        # the panels show the slice with lesions
+        pf = features_from_hu(scored, pad, spec, fitting=False, masks=(fov, body))
         f = pf.feat[pf.valid]
         sc = (mahalanobis_mixed(model.nu, model.sigma, f.mean(axis=0), np.cov(f, rowvar=False), RCOND)
               if f.shape[0] >= MIN_PATCHES_FOR_SCORE else np.nan)
